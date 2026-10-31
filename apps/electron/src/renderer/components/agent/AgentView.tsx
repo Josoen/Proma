@@ -2007,16 +2007,15 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     }
   }, [backgroundWaiting, isSessionThinkingAvailable, sessionId, sessionMeta, setAgentSessions, streaming])
 
-  /** 构建 externalSelectedModel 给 ModelSelector */
+  /** 仅在当前会话已配置模型时传给 ModelSelector；不复用其他会话的视觉缓存。 */
   const computedSelectedModel = React.useMemo(() => {
     if (!agentChannelId || !agentModelId) return null
     return { channelId: agentChannelId, modelId: agentModelId }
   }, [agentChannelId, agentModelId])
 
-  // 防止瞬态 null 传递给 ModelSelector（防御 overflow remount 时 stableModelInfoRef 丢失）
-  const stableSelectedModelRef = React.useRef(computedSelectedModel)
-  if (computedSelectedModel) stableSelectedModelRef.current = computedSelectedModel
-  const externalSelectedModel = computedSelectedModel ?? stableSelectedModelRef.current
+  // 选择器必须反映当前会话实际将用于发送的渠道/模型；保留旧值会出现
+  // “按钮显示已有模型、Composer 却提示先选模型”的假选中状态。
+  const externalSelectedModel = computedSelectedModel
 
   /** 发送消息 */
   const handleSend = React.useCallback(async (overrideText?: string, fromEditor = false): Promise<void> => {

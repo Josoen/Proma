@@ -18,6 +18,7 @@ import type {
   XaiOAuthCredentials,
   AgentQueryInput,
   ChannelModel,
+  ModelsDevModelInfo,
   JsonSchemaOutputFormat,
   PromaPermissionMode,
   ProviderType,
@@ -188,6 +189,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   openAIThinkingLevel?: AgentThinkingLevel
   /** 当前渠道模型的用户/目录绑定配置。 */
   modelConfig?: Pick<ChannelModel, 'contextWindow' | 'contextWindowSource' | 'maxTokens' | 'maxTokensSource' | 'thinkingLevels' | 'defaultThinkingLevel' | 'supportsImages' | 'supportsDocuments'>
+  /** models.dev 记录由主进程在启动 utility query 前读取，不在 utility process 访问 Electron app API。 */
+  modelsDevModel?: ModelsDevModelInfo
 }
 
 interface ActivePiSession {

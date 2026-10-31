@@ -8,7 +8,7 @@
 import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
 import { atomFamily } from 'jotai-family'
-import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel, GeminiThinkingLevel } from '@proma/shared'
+import type { ConversationMeta, ChatMessage, FileAttachment, ChatToolActivity, Channel, AgentThinkingLevel } from '@proma/shared'
 import type { QuotedSelection } from './preview-atoms'
 
 /** 全局渠道列表缓存（启动时加载一次，设置变更时刷新） */
@@ -178,8 +178,8 @@ export const thinkingEnabledAtom = atomWithStorage<boolean>(
   false,
 )
 
-/** Gemini 3 Chat 思考深度（模型不支持时由 adapter 安全归一化）。 */
-export const thinkingLevelAtom = atomWithStorage<GeminiThinkingLevel>(
+/** Chat 思考深度（模型不支持时由 adapter 安全归一化）。 */
+export const thinkingLevelAtom = atomWithStorage<AgentThinkingLevel>(
   'proma-thinking-level',
   'medium',
 )
@@ -299,7 +299,7 @@ export const conversationContextLengthAtom = atom<Map<string, ContextLengthValue
 export const conversationThinkingEnabledAtom = atom<Map<string, boolean>>(new Map())
 
 /** 每个对话的 Gemini 3 思考深度。 */
-export const conversationThinkingLevelAtom = atom<Map<string, GeminiThinkingLevel>>(new Map())
+export const conversationThinkingLevelAtom = atom<Map<string, AgentThinkingLevel>>(new Map())
 
 /** 每个对话的并排模式 */
 export const conversationParallelModeAtom = atom<Map<string, boolean>>(new Map())

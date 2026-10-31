@@ -214,10 +214,11 @@ export function ModelSelector({
     ) ?? null
   }, [selectedModel, modelOptions])
 
-  // 保持上次有效的模型信息，避免渠道未加载时闪烁"选择模型"
+  // 仅在渠道列表尚未加载时保留上次有效的模型信息，避免启动闪烁；
+  // 加载完成后若选择已失效，应显示真实的未选中状态而不是旧模型。
   const stableModelInfoRef = React.useRef(currentModelInfo)
   if (currentModelInfo) stableModelInfoRef.current = currentModelInfo
-  const displayModelInfo = currentModelInfo ?? stableModelInfoRef.current
+  const displayModelInfo = currentModelInfo ?? (channelsLoaded ? null : stableModelInfoRef.current)
 
   // Tooltip 必须始终保持 controlled 或 uncontrolled 之一。此前在 Popover 打开时传 false、关闭时传
   // undefined，Radix 会发出 controlled/uncontrolled 告警，且与模型 Popover 的 trigger 竞争焦点。

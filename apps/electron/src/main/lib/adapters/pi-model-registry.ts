@@ -20,6 +20,7 @@ import {
   isMimoV26Model,
   resolveReasoningCapability,
   resolveReasoningProfile,
+  type AgentThinkingLevel,
   type CodexOAuthCredentials,
   type GithubCopilotOAuthCredentials,
   type XaiOAuthCredentials,
@@ -37,7 +38,6 @@ import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai/compat'
 import type { PiAgentQueryOptions } from './pi-agent-adapter'
 import { rememberXaiOAuthCredentials, refreshXaiOAuthCredentialsSerial } from '../xai-oauth-credentials'
 import { supportsPiDeveloperRole } from './pi-provider-compat'
-import { lookupModelsDevModel } from '../models-dev-catalog'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type PiAiCompat = typeof import('@earendil-works/pi-ai/compat')
@@ -672,6 +672,11 @@ export async function resolvePiVisionRelayRoute(
 export async function resolvePiReasoningCapability(
   provider: ProviderType,
   modelId: string | undefined,
+  configured?: {
+    thinkingLevels?: AgentThinkingLevel[]
+    defaultThinkingLevel?: AgentThinkingLevel | null
+  },
+  modelsDevModel?: { thinkingLevels: AgentThinkingLevel[] },
 ): Promise<ReasoningCapability | undefined> {
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(modelId)
   const catalogModel = resolvedModelId
@@ -683,20 +688,28 @@ export async function resolvePiReasoningCapability(
       ? 'openai-responses'
       : toReasoningTransport(resolvePiApi(provider)),
   })
-  return resolveReasoningCapability({
+  const resolved = resolveReasoningCapability({
     profile,
     catalog: catalogModel && {
       reasoning: catalogModel.reasoning,
       thinkingLevelMap: catalogModel.thinkingLevelMap,
     },
   })
+  const levels = configured?.thinkingLevels?.length
+    ? configured.thinkingLevels
+    : modelsDevModel?.thinkingLevels
+  if (levels?.length) {
+    const defaultLevel = configured?.defaultThinkingLevel
+      ?? (resolved?.levels.includes('medium') ? 'medium' : undefined)
+      ?? (levels.includes('medium') ? 'medium' : (levels.find((level) => level !== 'off') ?? 'off'))
+    return { source: resolved?.source ?? 'pi-catalog', levels, defaultLevel }
+  }
+  return resolved
 }
 
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
-  const modelsDevModel = input.model
-    ? await lookupModelsDevModel({ provider: input.provider, baseUrl: input.baseUrl ?? '', modelId: input.model })
-    : undefined
+  const modelsDevModel = input.modelsDevModel
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
   const api = resolvePiApi(input.provider)
   const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
@@ -716,7 +729,9 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   const shouldForceAdaptiveThinking = shouldForcePiAdaptiveThinking(api, catalogModel, input.model)
   return {
     api,
-    reasoning: catalogModel?.reasoning ?? true,
+    reasoning: modelConfig?.thinkingLevels
+      ? modelConfig.thinkingLevels.some((level) => level !== 'off')
+      : (modelsDevModel?.thinkingLevels.some((level) => level !== 'off') ?? catalogModel?.reasoning ?? true),
     thinkingLevelMap: providerSpecificCapabilities?.thinkingLevelMap
       ?? catalogModel?.thinkingLevelMap,
     compat: shouldForceAdaptiveThinking

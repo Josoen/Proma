@@ -76,6 +76,7 @@ import { buildPiMcpTools } from './adapters/pi-mcp-tools'
 import { buildAgentRuntimeEnv, type AgentRuntimeEnv } from './agent-runtime-env'
 import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
+import { lookupModelsDevModel } from './models-dev-catalog'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
 import { generateCodexTitle } from './adapters/pi-codex-title-generator'
 import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
@@ -1491,7 +1492,17 @@ export class AgentOrchestrator {
         ? appSettings.agentMaxTurns
         : undefined
       const selectedModelConfig = channel.models.find((model) => model.id === selectedModelId)
-      const piReasoningCapability = await resolvePiReasoningCapability(channel.provider, selectedModelId)
+      const modelsDevModel = await lookupModelsDevModel({
+        provider: channel.provider,
+        baseUrl: channel.baseUrl,
+        modelId: selectedModelId,
+      })
+      const piReasoningCapability = await resolvePiReasoningCapability(
+        channel.provider,
+        selectedModelId,
+        selectedModelConfig,
+        modelsDevModel ?? undefined,
+      )
       const piThinkingLevel = resolvePiThinkingLevel(
         appSettings,
         sessionMeta,
@@ -1683,6 +1694,7 @@ export class AgentOrchestrator {
           }),
         thinkingLevel: piThinkingLevel!,
         ...(selectedModelConfig ? { modelConfig: selectedModelConfig } : {}),
+        ...(modelsDevModel ? { modelsDevModel } : {}),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),

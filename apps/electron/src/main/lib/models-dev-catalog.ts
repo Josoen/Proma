@@ -160,13 +160,15 @@ function modelOwnerKeys(modelId: string): readonly string[] {
 }
 
 function bundledCatalogPath(): string {
-  return app.isPackaged
-    ? join(process.resourcesPath, 'models.dev', 'api.json')
+  const isPackaged = app?.isPackaged === true
+  return isPackaged
+    ? join(process.resourcesPath ?? __dirname, 'models.dev', 'api.json')
     : join(__dirname, 'resources', 'models.dev', 'api.json')
 }
 
-function cachePath(): string {
-  return join(app.getPath('userData'), 'models-dev', 'catalog.json')
+function cachePath(): string | undefined {
+  const userData = app?.getPath?.('userData')
+  return userData ? join(userData, 'models-dev', 'catalog.json') : undefined
 }
 
 class ModelsDevCatalog {
@@ -178,7 +180,8 @@ class ModelsDevCatalog {
   async ensureLoaded(): Promise<void> {
     if (this.data) return
 
-    const cached = readJsonFileSafe<ModelsDevCacheFile>(cachePath())
+    const cachedPath = cachePath()
+    const cached = cachedPath ? readJsonFileSafe<ModelsDevCacheFile>(cachedPath) : null
     if (cached?.data && asRecord(cached.data)) {
       this.data = cached.data
       this.fetchedAt = cached.fetchedAt
@@ -232,8 +235,11 @@ class ModelsDevCatalog {
       const parsed = asRecord(JSON.parse(body) as unknown)
       if (!parsed) throw new Error('models.dev 返回的数据格式无效')
       const fetchedAt = Date.now()
-      mkdirSync(join(app.getPath('userData'), 'models-dev'), { recursive: true })
-      writeJsonFileAtomic(cachePath(), { fetchedAt, data: parsed })
+      const userData = app?.getPath?.('userData')
+      if (!userData) throw new Error('当前运行时不支持写入 models.dev 缓存')
+      const targetPath = join(userData, 'models-dev', 'catalog.json')
+      mkdirSync(join(userData, 'models-dev'), { recursive: true })
+      writeJsonFileAtomic(targetPath, { fetchedAt, data: parsed })
       this.data = parsed
       this.fetchedAt = fetchedAt
       this.source = 'remote'

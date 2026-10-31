@@ -3726,7 +3726,13 @@ export function registerIpcHandlers(): void {
       if (!channelId || !modelId) return undefined
       const channel = getChannelById(channelId)
       if (!channel) return undefined
-      return resolvePiReasoningCapability(channel.provider, modelId)
+      const configured = channel.models.find((model) => model.id === modelId)
+      const modelsDevModel = await lookupModelsDevModel({
+        provider: channel.provider,
+        baseUrl: channel.baseUrl,
+        modelId,
+      })
+      return resolvePiReasoningCapability(channel.provider, modelId, configured, modelsDevModel ?? undefined)
     }
   )
 
