@@ -17,6 +17,7 @@ import type {
   GithubCopilotOAuthCredentials,
   XaiOAuthCredentials,
   AgentQueryInput,
+  ChannelModel,
   JsonSchemaOutputFormat,
   PromaPermissionMode,
   ProviderType,
@@ -185,6 +186,8 @@ export interface PiAgentQueryOptions extends AgentQueryInput {
   onXaiOAuthCredentialsRefreshed?: (credentials: XaiOAuthCredentials) => void | Promise<void>
   /** 会话级 OpenAI（Codex OAuth / Responses API）思考深度。 */
   openAIThinkingLevel?: AgentThinkingLevel
+  /** 当前渠道模型的用户/目录绑定配置。 */
+  modelConfig?: Pick<ChannelModel, 'contextWindow' | 'contextWindowSource' | 'maxTokens' | 'maxTokensSource' | 'thinkingLevels' | 'defaultThinkingLevel' | 'supportsImages' | 'supportsDocuments'>
 }
 
 interface ActivePiSession {

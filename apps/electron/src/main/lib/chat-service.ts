@@ -23,6 +23,7 @@ import {
 } from '@proma/core'
 import type { ImageAttachmentData, ContinuationMessage } from '@proma/core'
 import { listChannels, resolveChannelRuntimeApiKey } from './channel-manager'
+import { lookupModelsDevModel } from './models-dev-catalog'
 import { appendMessage, updateConversationMeta, getConversationMessages } from './conversation-manager'
 import { readAttachmentAsBase64, isImageAttachment } from './attachment-service'
 import { extractTextFromAttachment, isDocumentAttachment } from './document-parser'
@@ -211,6 +212,12 @@ export async function sendMessage(
     return false
   }
 
+  const modelConfig = channel.models.find((model) => model.id === modelId)
+  const catalogModel = await lookupModelsDevModel({ provider: channel.provider, baseUrl: channel.baseUrl, modelId })
+  const effectiveMaxTokens = modelConfig?.maxTokensSource === 'user'
+    ? modelConfig.maxTokens
+    : modelConfig?.maxTokens ?? (catalogModel?.source === 'models.dev' ? catalogModel.maxTokens : undefined)
+
   // Subscription OAuth uses Pi provider-specific transports, which Chat mode does
   // not currently implement. Keep this guard for historical conversations that
   // still reference a formerly selectable subscription model.
@@ -337,6 +344,7 @@ export async function sendMessage(
         readImageAttachments: getImageAttachmentData,
         thinkingEnabled,
         thinkingLevel,
+        ...(effectiveMaxTokens ? { maxTokens: effectiveMaxTokens } : {}),
         tools,
         continuationMessages: continuationMessages.length > 0 ? continuationMessages : undefined,
       })
@@ -408,6 +416,7 @@ export async function sendMessage(
         readImageAttachments: getImageAttachmentData,
         thinkingEnabled,
         thinkingLevel,
+        ...(effectiveMaxTokens ? { maxTokens: effectiveMaxTokens } : {}),
         // 不传 tools，强制模型生成文本回复而非继续调用工具
         continuationMessages,
       })

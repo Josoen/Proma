@@ -22,6 +22,8 @@ import {
   Zap,
   Download,
   Search,
+  ChevronDown,
+  RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSetAtom } from 'jotai'
@@ -45,11 +47,12 @@ import type {
   CodexOAuthDeviceCode,
   GithubCopilotOAuthDeviceCode,
   FetchModelsResult,
+  ModelsDevCatalogStatus,
+  ModelsDevModelInfo,
   ProviderType,
   XaiOAuthDeviceCode,
 } from '@proma/shared'
 import {
-  normalizeBaseUrl,
   resolveAnthropicMessagesUrl,
   resolveOpenAIChatCompletionsUrl,
   resolveOpenAIResponsesUrl,
@@ -141,11 +144,6 @@ function buildPreviewUrl(baseUrl: string, provider: ProviderType): string {
   return resolveOpenAIChatCompletionsUrl(baseUrl, provider)
 }
 
-function isThirdPartyBaseUrl(provider: ProviderType, baseUrl: string): boolean {
-  const normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-  return Boolean(normalizedBaseUrl) && normalizedBaseUrl !== normalizeBaseUrl(PROVIDER_DEFAULT_URLS[provider])
-}
-
 function getUrlInputLabel(provider: ProviderType): string {
   return provider === 'custom' || provider === 'anthropic-compatible' ? '请求地址' : 'Base URL'
 }
@@ -197,6 +195,53 @@ function buildZhipuTeamSecret(secret: ZhipuTeamSecretForm): string {
 
 /** auto-save 防抖延迟 */
 const AUTO_SAVE_DELAY = 600
+const THINKING_LEVEL_OPTIONS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+const CONTEXT_WINDOW_PRESETS = [128_000, 200_000, 1_000_000]
+const MAX_OUTPUT_PRESETS = [8_192, 32_000, 64_000, 128_000]
+
+function formatTokenCount(value: number | undefined): string {
+  if (!value || value <= 0) return '-'
+  if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(2))}M`
+  if (value >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`
+  return String(value)
+}
+
+function applyModelsDevInfo(model: ChannelModel, info: ModelsDevModelInfo): ChannelModel {
+  const next: ChannelModel = { ...model }
+  if (next.contextWindowSource !== 'user' && (info.source === 'models.dev' || next.contextWindow === undefined)) {
+    next.contextWindow = info.contextWindow
+    if (info.source === 'models.dev') next.contextWindowSource = 'catalog'
+  }
+  if (next.maxTokensSource !== 'user' && (info.source === 'models.dev' || next.maxTokens === undefined)) {
+    next.maxTokens = info.maxTokens
+    if (info.source === 'models.dev') next.maxTokensSource = 'catalog'
+  }
+  if (!next.thinkingLevels || next.thinkingLevels.length === 0) {
+    next.thinkingLevels = [...info.thinkingLevels]
+  }
+  if (next.defaultThinkingLevel === undefined) {
+    next.defaultThinkingLevel = info.thinkingLevels.includes('medium')
+      ? 'medium'
+      : (info.thinkingLevels[0] ?? 'off')
+  }
+  if (next.supportsImages === undefined) next.supportsImages = info.supportsImages ?? null
+  if (next.supportsDocuments === undefined) next.supportsDocuments = info.supportsDocuments ?? null
+  return next
+}
+
+/** 目录失去记录时清掉此前跟随目录的值，运行时再使用通用兜底；用户覆盖保持不动。 */
+function clearMissingModelsDevInfo(model: ChannelModel): ChannelModel {
+  const next: ChannelModel = { ...model }
+  if (next.contextWindowSource === 'catalog') {
+    next.contextWindow = undefined
+    next.contextWindowSource = undefined
+  }
+  if (next.maxTokensSource === 'catalog') {
+    next.maxTokens = undefined
+    next.maxTokensSource = undefined
+  }
+  return next
+}
 
 export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): React.ReactElement {
   const isEdit = channel !== null
@@ -205,9 +250,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const [name, setName] = React.useState(channel?.name ?? '')
   const [provider, setProvider] = React.useState<ProviderType>(channel?.provider ?? 'anthropic')
   const [baseUrl, setBaseUrl] = React.useState(channel?.baseUrl ?? PROVIDER_DEFAULT_URLS.anthropic)
-  const [acknowledgedBaseUrl, setAcknowledgedBaseUrl] = React.useState(() => (
-    normalizeBaseUrl(channel?.baseUrl ?? PROVIDER_DEFAULT_URLS[channel?.provider ?? 'anthropic'])
-  ))
   const [apiKey, setApiKey] = React.useState('')
   const [zhipuTeamSecret, setZhipuTeamSecret] = React.useState<ZhipuTeamSecretForm>(EMPTY_ZHIPU_TEAM_SECRET)
   const [showApiKey, setShowApiKey] = React.useState(false)
@@ -217,6 +259,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   // 新模型输入
   const [newModelId, setNewModelId] = React.useState('')
   const [newModelName, setNewModelName] = React.useState('')
+  const [expandedModelId, setExpandedModelId] = React.useState<string | null>(null)
+  const [modelsDevStatus, setModelsDevStatus] = React.useState<ModelsDevCatalogStatus | null>(null)
+  const [refreshingModelsDev, setRefreshingModelsDev] = React.useState(false)
+  const catalogEnrichedRef = React.useRef(false)
 
   // 模型搜索过滤
   const [modelFilter, setModelFilter] = React.useState('')
@@ -229,8 +275,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   const [fetchResult, setFetchResult] = React.useState<FetchModelsResult | null>(null)
   const [apiKeyLoaded, setApiKeyLoaded] = React.useState(false)
   const [showExitDialog, setShowExitDialog] = React.useState(false)
-  const [showBaseUrlRiskDialog, setShowBaseUrlRiskDialog] = React.useState(false)
-  const [pendingRiskAction, setPendingRiskAction] = React.useState<'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null>(null)
   const [codexLoggingIn, setCodexLoggingIn] = React.useState(false)
   const [codexDeviceCode, setCodexDeviceCode] = React.useState<CodexOAuthDeviceCode | null>(null)
   const [githubCopilotLoggingIn, setGithubCopilotLoggingIn] = React.useState(false)
@@ -294,6 +338,28 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
   }, [isEdit, channel, apiKeyLoaded])
 
+  React.useEffect(() => {
+    window.electronAPI.modelsDevStatus()
+      .then(setModelsDevStatus)
+      .catch((error) => console.warn('[模型配置表单] 读取 models.dev 状态失败:', error))
+  }, [])
+
+  React.useEffect(() => {
+    if (catalogEnrichedRef.current || models.length === 0) return
+    catalogEnrichedRef.current = true
+    void window.electronAPI.modelsDevLookupMany(
+      models.map((model) => ({ provider, baseUrl, modelId: model.id })),
+    ).then((result) => {
+      setModels((current) => current.map((model) => {
+        const info = result.infos[model.id]
+        return info ? applyModelsDevInfo(model, info) : clearMissingModelsDevInfo(model)
+      }))
+    }).catch((error) => {
+      catalogEnrichedRef.current = false
+      console.warn('[模型配置表单] 初始化 models.dev 信息失败:', error)
+    })
+  }, [models, provider, baseUrl])
+
   const isZhipuTeamProvider = provider === 'zhipu-coding-team'
   const isCodexProvider = provider === 'openai-codex'
   const isGithubCopilotProvider = provider === 'github-copilot'
@@ -313,9 +379,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
         : isXaiProvider
         ? Boolean(xaiCredentials)
         : Boolean(apiKey.trim())
-  const requiresBaseUrlRiskAcknowledgement = isThirdPartyBaseUrl(provider, baseUrl)
-    && normalizeBaseUrl(baseUrl) !== acknowledgedBaseUrl
-
   const updateZhipuTeamSecret = React.useCallback((patch: Partial<ZhipuTeamSecretForm>) => {
     setZhipuTeamSecret((prev) => {
       const next = { ...prev, ...patch }
@@ -363,9 +426,8 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     nextBaseUrl: string,
     nextApiKey: string,
     nextEnabled: boolean,
-    requiresRiskAcknowledgement: boolean,
   ) => {
-    if (!isEdit || !initializedRef.current || requiresRiskAcknowledgement) return
+    if (!isEdit || !initializedRef.current) return
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
     autoSaveTimerRef.current = setTimeout(() => {
       doAutoSave(nextModels, nextName, nextProvider, nextBaseUrl, nextApiKey, nextEnabled)
@@ -393,14 +455,14 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       baseUrl,
       effectiveApiKey,
       enabled,
-      requiresBaseUrlRiskAcknowledgement,
     )
     return () => { if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current) }
-  }, [models, name, provider, baseUrl, effectiveApiKey, enabled, requiresBaseUrlRiskAcknowledgement, scheduleAutoSave])
+  }, [models, name, provider, baseUrl, effectiveApiKey, enabled, scheduleAutoSave])
 
   // 切换供应商时自动更新 Base URL 与名称，并为支持的渠道自动添加预设模型
   const handleProviderChange = (newProvider: string): void => {
     const p = newProvider as ProviderType
+    catalogEnrichedRef.current = false
     // 若 name 为空或仍是上一个 provider 的默认名称，则用新 provider 的名称覆盖；用户手动改过的 name 不动
     const trimmedName = name.trim()
     if (!trimmedName || trimmedName === PROVIDER_LABELS[provider]) {
@@ -408,7 +470,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
     setProvider(p)
     setBaseUrl(PROVIDER_DEFAULT_URLS[p])
-    setAcknowledgedBaseUrl(normalizeBaseUrl(PROVIDER_DEFAULT_URLS[p]))
     setTestResult(null)
     setFetchResult(null)
     if (p === 'zhipu-coding-team') {
@@ -484,8 +545,18 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
 
     setModels((prev) => [...prev, model])
+    setExpandedModelId(model.id)
     setNewModelId('')
     setNewModelName('')
+
+    void window.electronAPI.modelsDevLookup({ provider, baseUrl, modelId: model.id })
+      .then((result) => {
+        if (!result.info) return
+        setModels((prev) => prev.map((current) => (
+          current.id === model.id ? applyModelsDevInfo(current, result.info!) : current
+        )))
+      })
+      .catch((error) => console.warn('[模型配置表单] 补全手动模型信息失败:', error))
   }
 
   /** 删除模型 */
@@ -705,6 +776,30 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
   }
 
+  const lookupModelInfo = React.useCallback(async (modelId: string): Promise<ModelsDevModelInfo | null> => {
+    try {
+      const result = await window.electronAPI.modelsDevLookup({ provider, baseUrl, modelId })
+      return result.info
+    } catch (error) {
+      console.warn('[模型配置表单] 查询 models.dev 模型失败:', error)
+      return null
+    }
+  }, [provider, baseUrl])
+
+  const refreshModelsDev = async (): Promise<void> => {
+    setRefreshingModelsDev(true)
+    try {
+      const status = await window.electronAPI.modelsDevRefresh()
+      setModelsDevStatus(status)
+      if (status.lastError) toast.error(`模型目录同步失败：${status.lastError}`)
+      else toast.success(`模型目录已同步（${status.modelCount} 个模型）`)
+    } catch (error) {
+      toast.error('模型目录同步失败')
+    } finally {
+      setRefreshingModelsDev(false)
+    }
+  }
+
   /** 从供应商 API 拉取可用模型列表。 */
   const fetchAvailableModels = async (): Promise<void> => {
     // 订阅 provider 走 Pi SDK 内置目录，不依赖 baseUrl；其余 provider 仍要求 baseUrl。
@@ -729,7 +824,18 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       // - 既不在新结果里、也不是手动添加的旧模型一律丢弃（清除残留）
       // 拉取失败时保留现有列表，避免 auto-save 持久化空模型列表
       if (!result.success) return
-      const fetchedModels = result.models
+      let fetchedModels = result.models
+      try {
+        const catalogResult = await window.electronAPI.modelsDevLookupMany(
+          fetchedModels.map((model) => ({ provider, baseUrl, modelId: model.id })),
+        )
+        fetchedModels = fetchedModels.map((model) => {
+          const info = catalogResult.infos[model.id]
+          return info ? applyModelsDevInfo(model, info) : clearMissingModelsDevInfo(model)
+        })
+      } catch (error) {
+        console.warn('[模型配置表单] 批量补全 models.dev 信息失败:', error)
+      }
       const fetchedById = new Map(fetchedModels.map((m) => [m.id, m]))
       setModels((prev) => {
         const manualKept = prev.filter((m) => m.source === 'manual' && !fetchedById.has(m.id))
@@ -738,8 +844,20 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           // ChatGPT (Codex) 是 SDK 内置的少量精选模型，拉取即全部启用，
           // 与登录自动拉取路径（handleCodexLogin）保持一致，避免新模型（如 gpt-5.6 系列）
           // 默认未启用而沉到「可用模型」折叠区，被误认为"拉不到"。
-          if (isSubscriptionProvider) return { ...m, enabled: true }
-          return old ? { ...m, enabled: old.enabled } : { ...m, enabled: false }
+          if (!old) return { ...m, enabled: isSubscriptionProvider }
+          // 刷新供应商列表不能丢掉用户覆盖或已缓存的目录元数据。
+          return {
+            ...m,
+            enabled: isSubscriptionProvider ? true : old.enabled,
+            ...(old.contextWindow !== undefined ? { contextWindow: old.contextWindow } : {}),
+            ...(old.contextWindowSource ? { contextWindowSource: old.contextWindowSource } : {}),
+            ...(old.maxTokens !== undefined ? { maxTokens: old.maxTokens } : {}),
+            ...(old.maxTokensSource ? { maxTokensSource: old.maxTokensSource } : {}),
+            ...(old.thinkingLevels ? { thinkingLevels: old.thinkingLevels } : {}),
+            ...(old.defaultThinkingLevel !== undefined ? { defaultThinkingLevel: old.defaultThinkingLevel } : {}),
+            ...(old.supportsImages !== undefined ? { supportsImages: old.supportsImages } : {}),
+            ...(old.supportsDocuments !== undefined ? { supportsDocuments: old.supportsDocuments } : {}),
+          }
         })
         return [...manualKept, ...merged]
       })
@@ -751,10 +869,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   }
 
   const handleFetchModels = (): void => {
-    if (requiresBaseUrlRiskAcknowledgement) {
-      requestBaseUrlRiskAcknowledgement('fetch')
-      return
-    }
     void fetchAvailableModels()
   }
 
@@ -782,10 +896,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
   }
 
   const handleTest = (): void => {
-    if (requiresBaseUrlRiskAcknowledgement) {
-      requestBaseUrlRiskAcknowledgement('test')
-      return
-    }
     void testChannelConnection()
   }
 
@@ -815,52 +925,10 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
     }
   }, [name, provider, baseUrl, effectiveApiKey, hasRequiredSecret, models, enabled])
 
-  /** 显示第三方 Base URL 风险确认。 */
-  const requestBaseUrlRiskAcknowledgement = (action: 'auto-save' | 'create' | 'fetch' | 'save-and-close' | 'test' | null): void => {
-    setPendingRiskAction(action)
-    setShowBaseUrlRiskDialog(true)
-  }
-
-  /** 确认风险后，仅放行当前变更的 Base URL。 */
-  const handleBaseUrlRiskAcknowledgement = async (): Promise<void> => {
-    const action = pendingRiskAction
-    setAcknowledgedBaseUrl(normalizeBaseUrl(baseUrl))
-    setPendingRiskAction(null)
-    setShowBaseUrlRiskDialog(false)
-
-    // 确认后由 acknowledgedBaseUrl 变化触发既有的防抖 auto-save，避免重复保存。
-    if (action === 'auto-save') return
-    if (action === 'fetch') {
-      await fetchAvailableModels()
-      return
-    }
-    if (action === 'test') {
-      await testChannelConnection()
-      return
-    }
-
-    if (action !== 'create' && action !== 'save-and-close') return
-    const savedChannel = await doCreate()
-    if (!savedChannel) return
-    if (action === 'save-and-close') setShowExitDialog(false)
-    onSaved(savedChannel)
-  }
-
-  /** Base URL 失焦时，要求确认第三方中转站风险。 */
-  const handleBaseUrlBlur = (): void => {
-    if (requiresBaseUrlRiskAcknowledgement) {
-      requestBaseUrlRiskAcknowledgement(isEdit ? 'auto-save' : null)
-    }
-  }
-
   /** 创建渠道（仅新建模式） */
   const handleCreate = async (): Promise<void> => {
     if (models.length === 0) {
       toast.warning('尚未配置模型，建议先从供应商获取或手动添加', { id: 'no-models-warn' })
-      return
-    }
-    if (requiresBaseUrlRiskAcknowledgement) {
-      requestBaseUrlRiskAcknowledgement('create')
       return
     }
     const savedChannel = await doCreate()
@@ -906,10 +974,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
 
   /** 保存并关闭（从弹窗触发） */
   const handleSaveAndClose = async (): Promise<void> => {
-    if (requiresBaseUrlRiskAcknowledgement) {
-      requestBaseUrlRiskAcknowledgement('save-and-close')
-      return
-    }
     const savedChannel = await doCreate()
     if (savedChannel) {
       setShowExitDialog(false)
@@ -1001,7 +1065,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
               label={getUrlInputLabel(provider)}
               value={baseUrl}
               onChange={setBaseUrl}
-              onBlur={handleBaseUrlBlur}
               placeholder={getUrlInputPlaceholder(provider)}
               description={baseUrl.trim() ? `预览：${buildPreviewUrl(baseUrl, provider)}` : undefined}
             />
@@ -1245,25 +1308,193 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           ) : (
             <div className="divide-y divide-border/50">
               {enabledModels.map((model) => (
-                <div
-                  key={model.id}
-                  className="flex items-center gap-2 px-4 py-2.5 group"
-                >
-                  <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" />
-                  <span className="text-sm text-foreground flex-1">
-                    {model.name}
-                    {model.name !== model.id && (
-                      <span className="text-muted-foreground ml-1">({model.id})</span>
-                    )}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleModel(model.id)}
-                    className="p-0.5 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                    title="取消启用"
-                  >
-                    <X size={14} />
-                  </button>
+                <div key={model.id} className="px-4 py-2.5 group">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-emerald-500 flex-shrink-0" />
+                    <span className="min-w-0 flex-1 text-sm text-foreground">
+                      <span className="block truncate">{model.name}</span>
+                      <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                        {model.id} · 上下文 {formatTokenCount(model.contextWindow)} · 输出 {formatTokenCount(model.maxTokens)}
+                        {!model.contextWindow && !model.maxTokens ? ' · 未找到目录信息' : ''}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedModelId((current) => current === model.id ? null : model.id)}
+                      className="flex items-center gap-1 px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
+                      aria-expanded={expandedModelId === model.id}
+                    >
+                      高级
+                      <ChevronDown size={13} className={cn('transition-transform', expandedModelId === model.id && 'rotate-180')} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleModel(model.id)}
+                      className="p-0.5 text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                      title="取消启用"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  {expandedModelId === model.id && (
+                    <div className="mt-3 space-y-3 rounded-md border border-border/60 bg-muted/20 p-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-medium text-muted-foreground">上下文长度</div>
+                          <div className="flex flex-wrap gap-1">
+                            {CONTEXT_WINDOW_PRESETS.map((preset) => (
+                              <Button
+                                key={preset}
+                                variant={model.contextWindow === preset ? 'secondary' : 'ghost'}
+                                size="sm"
+                                type="button"
+                                className="h-6 px-2 text-[11px]"
+                                onClick={() => setModels((prev) => prev.map((item) => item.id === model.id
+                                  ? { ...item, contextWindow: preset, contextWindowSource: 'user' }
+                                  : item))}
+                              >
+                                {formatTokenCount(preset)}
+                              </Button>
+                            ))}
+                          </div>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={model.contextWindow ?? ''}
+                            onChange={(event) => setModels((prev) => prev.map((item) => item.id === model.id
+                              ? { ...item, contextWindow: Number(event.target.value) || undefined, contextWindowSource: 'user' }
+                              : item))}
+                            className="h-8 text-xs"
+                            placeholder="跟随 models.dev"
+                          />
+                          <div className="text-[11px] text-muted-foreground">
+                            {model.contextWindowSource === 'user' ? '已手动覆盖' : '使用目录默认'}
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-medium text-muted-foreground">最大输出</div>
+                          <div className="flex flex-wrap gap-1">
+                            {MAX_OUTPUT_PRESETS.map((preset) => (
+                              <Button
+                                key={preset}
+                                variant={model.maxTokens === preset ? 'secondary' : 'ghost'}
+                                size="sm"
+                                type="button"
+                                className="h-6 px-2 text-[11px]"
+                                onClick={() => setModels((prev) => prev.map((item) => item.id === model.id
+                                  ? { ...item, maxTokens: preset, maxTokensSource: 'user' }
+                                  : item))}
+                              >
+                                {formatTokenCount(preset)}
+                              </Button>
+                            ))}
+                          </div>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={model.maxTokens ?? ''}
+                            onChange={(event) => setModels((prev) => prev.map((item) => item.id === model.id
+                              ? { ...item, maxTokens: Number(event.target.value) || undefined, maxTokensSource: 'user' }
+                              : item))}
+                            className="h-8 text-xs"
+                            placeholder="跟随 models.dev"
+                          />
+                          <div className="text-[11px] text-muted-foreground">
+                            {model.maxTokensSource === 'user' ? '已手动覆盖' : '使用目录默认'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-medium text-muted-foreground">思考等级</div>
+                        <div className="flex flex-wrap gap-1">
+                          {THINKING_LEVEL_OPTIONS.map((level) => {
+                            const selected = (model.thinkingLevels ?? []).includes(level)
+                            return (
+                              <Button
+                                key={level}
+                                variant={selected ? 'secondary' : 'ghost'}
+                                size="sm"
+                                type="button"
+                                className="h-6 px-2 text-[11px]"
+                                onClick={() => setModels((prev) => prev.map((item) => {
+                                  if (item.id !== model.id) return item
+                                  const levels = item.thinkingLevels ?? []
+                                  const nextLevels = selected
+                                    ? levels.filter((entry) => entry !== level)
+                                    : [...levels, level]
+                                  const nextDefault = nextLevels.includes(item.defaultThinkingLevel ?? 'off')
+                                    ? item.defaultThinkingLevel
+                                    : (nextLevels[0] ?? 'off')
+                                  return { ...item, thinkingLevels: nextLevels, defaultThinkingLevel: nextDefault }
+                                }))}
+                              >
+                                {level}
+                              </Button>
+                            )
+                          })}
+                        </div>
+                        <select
+                          value={model.defaultThinkingLevel ?? 'off'}
+                          onChange={(event) => setModels((prev) => prev.map((item) => item.id === model.id
+                            ? { ...item, defaultThinkingLevel: event.target.value as ChannelModel['defaultThinkingLevel'] }
+                            : item))}
+                          className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+                        >
+                          {THINKING_LEVEL_OPTIONS
+                            .filter((level) => (model.thinkingLevels ?? []).includes(level))
+                            .map((level) => <option key={level} value={level}>{`默认：${level}`}</option>)}
+                        </select>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                        <label className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={model.supportsImages === true}
+                            onChange={(event) => setModels((prev) => prev.map((item) => item.id === model.id
+                              ? { ...item, supportsImages: event.target.checked }
+                              : item))}
+                          />
+                          图像输入
+                        </label>
+                        <label className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={model.supportsDocuments === true}
+                            onChange={(event) => setModels((prev) => prev.map((item) => item.id === model.id
+                              ? { ...item, supportsDocuments: event.target.checked }
+                              : item))}
+                          />
+                          文档输入
+                        </label>
+                        <button
+                          type="button"
+                          className="text-primary hover:underline"
+                          onClick={() => void lookupModelInfo(model.id).then((info) => {
+                            if (!info) return
+                            setModels((prev) => prev.map((item) => {
+                              if (item.id !== model.id) return item
+                              return applyModelsDevInfo({
+                                ...item,
+                                contextWindow: undefined,
+                                contextWindowSource: undefined,
+                                maxTokens: undefined,
+                                maxTokensSource: undefined,
+                                thinkingLevels: undefined,
+                                defaultThinkingLevel: undefined,
+                                supportsImages: undefined,
+                                supportsDocuments: undefined,
+                              }, info)
+                            }))
+                          })}
+                        >
+                          恢复目录默认
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1275,23 +1506,41 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
       <SettingsSection
         title="可用模型"
         action={
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={handleFetchModels}
-            disabled={fetchingModels || !hasRequiredSecret || (!isSubscriptionProvider && !baseUrl.trim())}
-            className="h-7 text-xs"
-          >
-            {fetchingModels ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <Download size={12} />
-            )}
-            <span>从供应商获取</span>
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => void refreshModelsDev()}
+              disabled={refreshingModelsDev}
+              className="h-7 px-2 text-xs"
+              title={modelsDevStatus ? `目录 ${modelsDevStatus.modelCount} 个模型` : '同步 models.dev'}
+            >
+              <RefreshCw size={12} className={cn(refreshingModelsDev && 'animate-spin')} />
+              <span>同步目录</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={handleFetchModels}
+              disabled={fetchingModels || !hasRequiredSecret || (!isSubscriptionProvider && !baseUrl.trim())}
+              className="h-7 text-xs"
+            >
+              {fetchingModels ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              <span>从供应商获取</span>
+            </Button>
+          </div>
         }
       >
+        {modelsDevStatus && (
+          <div className="px-1 text-[11px] text-muted-foreground">
+            默认信息来源：models.dev · {modelsDevStatus.modelCount} 个模型
+            {modelsDevStatus.lastError
+              ? ` · 同步失败，继续使用本地目录（${modelsDevStatus.lastError}）`
+              : ''}
+          </div>
+        )}
         {/* 拉取结果提示 */}
         {fetchResult && (
           <div className={cn(
@@ -1337,11 +1586,12 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
                   onClick={() => handleToggleModel(model.id)}
                 >
                   <Plus size={14} className="text-muted-foreground flex-shrink-0" />
-                  <span className="text-sm text-foreground flex-1">
-                    {model.name}
-                    {model.name !== model.id && (
-                      <span className="text-muted-foreground ml-1">({model.id})</span>
-                    )}
+                  <span className="min-w-0 flex-1 text-sm text-foreground">
+                    <span className="block truncate">{model.name}</span>
+                    <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                      {model.id} · 上下文 {formatTokenCount(model.contextWindow)} · 输出 {formatTokenCount(model.maxTokens)}
+                      {!model.contextWindow && !model.maxTokens ? ' · 未找到目录信息' : ''}
+                    </span>
                   </span>
                   <button
                     type="button"
@@ -1409,46 +1659,6 @@ export function ChannelForm({ channel, onSaved, onCancel }: ChannelFormProps): R
           </div>
         </SettingsCard>
       </SettingsSection>
-
-      {/* 第三方 Base URL 风险确认 */}
-      <AlertDialog
-        open={showBaseUrlRiskDialog}
-        onOpenChange={(open) => {
-          setShowBaseUrlRiskDialog(open)
-          if (!open) setPendingRiskAction(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>确认使用第三方中转站？</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2">
-                <p>该地址并非当前供应商的官方默认 Base URL。中转站可能存在篡改对话内容和模型响应，存在中间人攻击、凭据泄露与隐私风险。</p>
-                <p>其协议适配也可能导致上下文窗口、工具调用、多模态或流式内容显示异常。请仅使用你信赖的服务，并先用非敏感内容测试。</p>
-                <p>Proma 仅作为本地 Agent 执行环境：配置、会话等本地数据均存储在你的设备上，Proma 本身不会额外构成数据风险。</p>
-                <p>
-                  如你正在寻求更好的选择，欢迎使用{' '}
-                  <a
-                    href="https://proma.cool/download"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium text-primary underline underline-offset-2 hover:text-primary/80"
-                  >
-                    Proma 商业版
-                  </a>
-                  ：提供安全、稳定、优惠的内置模型选择，保证更好的体验，同时保留你自由配置第三方渠道的权利。
-                </p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBaseUrlRiskAcknowledgement}>
-              知晓并愿意承担风险
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* 退出拦截弹窗 */}
       <AlertDialog open={showExitDialog} onOpenChange={setShowExitDialog}>

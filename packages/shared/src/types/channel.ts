@@ -1,3 +1,5 @@
+import type { AgentThinkingLevel } from './agent'
+
 /**
  * 渠道（Channel）相关类型定义
  *
@@ -326,6 +328,22 @@ export interface ChannelModel {
   enabled: boolean
   /** 来源标记：手动添加的模型在拉取供应商列表时保留，不会被覆盖清除 */
   source?: 'manual' | 'fetched'
+  /** 有效上下文窗口（token 数）；缺失时由目录或 runtime 默认值补全 */
+  contextWindow?: number
+  /** 上下文窗口来源；user 覆盖不会被目录刷新替换 */
+  contextWindowSource?: 'catalog' | 'user'
+  /** 有效最大输出（token 数）；缺失时由目录或 runtime 默认值补全 */
+  maxTokens?: number
+  /** 最大输出来源；user 覆盖不会被目录刷新替换 */
+  maxTokensSource?: 'catalog' | 'user'
+  /** 允许用户从模型能力目录中选择的思考等级 */
+  thinkingLevels?: AgentThinkingLevel[]
+  /** 新 Agent 会话的默认思考等级 */
+  defaultThinkingLevel?: AgentThinkingLevel | null
+  /** 用户对图像输入能力的显式覆盖；null/undefined 跟随目录 */
+  supportsImages?: boolean | null
+  /** 用户对文档输入能力的显式覆盖；null/undefined 跟随目录 */
+  supportsDocuments?: boolean | null
 }
 
 /**
@@ -460,6 +478,43 @@ export interface FetchModelsResult {
   models: ChannelModel[]
 }
 
+/** models.dev 目录状态。目录只提供默认元数据，不代表渠道真实可用模型。 */
+export interface ModelsDevCatalogStatus {
+  loaded: boolean
+  source: 'bundled' | 'cache' | 'remote' | 'empty'
+  fetchedAt?: number
+  providerCount: number
+  modelCount: number
+  lastError?: string
+}
+
+/** models.dev 模型默认信息的 Proma 传输子集。 */
+export interface ModelsDevModelInfo {
+  id: string
+  name: string
+  contextWindow?: number
+  maxTokens?: number
+  thinkingLevels: AgentThinkingLevel[]
+  supportsImages?: boolean
+  supportsDocuments?: boolean
+  /** 仅表示命中了 models.dev；未命中时 IPC 返回 null。 */
+  source: 'models.dev'
+}
+
+export interface ModelsDevLookupInput {
+  provider: ProviderType
+  baseUrl: string
+  modelId: string
+}
+
+export interface ModelsDevLookupResult {
+  info: ModelsDevModelInfo | null
+}
+
+export interface ModelsDevLookupManyResult {
+  infos: Record<string, ModelsDevModelInfo | null>
+}
+
 /**
  * 订阅 Plan 的窗口型额度。
  *
@@ -518,6 +573,14 @@ export const CHANNEL_IPC_CHANNELS = {
   TEST: 'channel:test',
   /** 从供应商拉取可用模型列表 */
   FETCH_MODELS: 'channel:fetch-models',
+  /** 获取 models.dev 目录状态 */
+  MODELS_DEV_STATUS: 'channel:models-dev-status',
+  /** 手动刷新 models.dev 目录 */
+  MODELS_DEV_REFRESH: 'channel:models-dev-refresh',
+  /** 查询单个模型的 models.dev 默认信息 */
+  MODELS_DEV_LOOKUP: 'channel:models-dev-lookup',
+  /** 批量查询 models.dev 默认信息 */
+  MODELS_DEV_LOOKUP_MANY: 'channel:models-dev-lookup-many',
   /** 直接测试连接（无需已保存渠道，传入明文凭证） */
   TEST_DIRECT: 'channel:test-direct',
   /** 查询订阅 Plan 额度 */

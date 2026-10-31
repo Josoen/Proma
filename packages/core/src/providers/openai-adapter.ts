@@ -201,6 +201,7 @@ export class OpenAIAdapter implements ProviderAdapter {
       messages,
       stream: true,
     }
+    if (input.maxTokens && input.maxTokens > 0) bodyObj.max_tokens = input.maxTokens
 
     // 工具定义
     if (input.tools && input.tools.length > 0) {

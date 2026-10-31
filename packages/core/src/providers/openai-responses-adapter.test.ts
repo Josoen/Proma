@@ -48,6 +48,20 @@ describe('OpenAIResponsesAdapter', () => {
     ])
   })
 
+  test('Given 模型最大输出配置 When buildStreamRequest Then 写入 max_output_tokens', () => {
+    const request = adapter.buildStreamRequest({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      modelId: 'gpt-5.1',
+      history: [],
+      userMessage: '你好',
+      readImageAttachments: () => [],
+      maxTokens: 4096,
+    })
+
+    expect((JSON.parse(request.body) as { max_output_tokens: number }).max_output_tokens).toBe(4096)
+  })
+
   test('Given Responses 文本 delta When parseSSELine Then 输出 chunk', () => {
     expect(adapter.parseSSELine(JSON.stringify({ type: 'response.output_text.delta', delta: 'hi' }))).toEqual([
       { type: 'chunk', delta: 'hi' },

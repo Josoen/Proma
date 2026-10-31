@@ -90,6 +90,11 @@ extraResources:
     to: startup-splash
     filter:
       - "**/*"
+  # models.dev 发布快照；运行时只读，用户刷新后的副本写入 userData。
+  - from: resources/models.dev
+    to: models.dev
+    filter:
+      - "api.json"
 
 # ============================================
 # macOS 配置

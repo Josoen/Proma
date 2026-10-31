@@ -18,6 +18,10 @@ import type {
   ChannelDirectTestInput,
   FetchModelsInput,
   FetchModelsResult,
+  ModelsDevCatalogStatus,
+  ModelsDevLookupInput,
+  ModelsDevLookupManyResult,
+  ModelsDevLookupResult,
   ChannelPlanQuotaResult,
   CodexOAuthLoginResult,
   XaiOAuthLoginResult,
@@ -324,6 +328,18 @@ export interface ElectronAPI {
 
   /** 从供应商拉取可用模型列表（直接传入凭证，无需已保存渠道） */
   fetchModels: (input: FetchModelsInput) => Promise<FetchModelsResult>
+
+  /** 获取 models.dev 目录状态 */
+  modelsDevStatus: () => Promise<ModelsDevCatalogStatus>
+
+  /** 手动刷新 models.dev 目录 */
+  modelsDevRefresh: () => Promise<ModelsDevCatalogStatus>
+
+  /** 查询单个模型的 models.dev 默认信息 */
+  modelsDevLookup: (input: ModelsDevLookupInput) => Promise<ModelsDevLookupResult>
+
+  /** 批量查询 models.dev 默认信息 */
+  modelsDevLookupMany: (inputs: ModelsDevLookupInput[]) => Promise<ModelsDevLookupManyResult>
 
   /** 查询渠道订阅 Plan 额度 */
   getChannelPlanQuota: (channelId: string) => Promise<ChannelPlanQuotaResult>
@@ -1553,6 +1569,22 @@ const electronAPI: ElectronAPI = {
 
   fetchModels: (input: FetchModelsInput) => {
     return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.FETCH_MODELS, input)
+  },
+
+  modelsDevStatus: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.MODELS_DEV_STATUS)
+  },
+
+  modelsDevRefresh: () => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.MODELS_DEV_REFRESH)
+  },
+
+  modelsDevLookup: (input: ModelsDevLookupInput) => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.MODELS_DEV_LOOKUP, input)
+  },
+
+  modelsDevLookupMany: (inputs: ModelsDevLookupInput[]) => {
+    return ipcRenderer.invoke(CHANNEL_IPC_CHANNELS.MODELS_DEV_LOOKUP_MANY, inputs)
   },
 
   getChannelPlanQuota: (channelId: string) => {

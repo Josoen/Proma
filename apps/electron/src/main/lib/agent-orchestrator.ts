@@ -1490,8 +1490,16 @@ export class AgentOrchestrator {
       const maxTurns = appSettings.agentMaxTurns && appSettings.agentMaxTurns > 0
         ? appSettings.agentMaxTurns
         : undefined
+      const selectedModelConfig = channel.models.find((model) => model.id === selectedModelId)
       const piReasoningCapability = await resolvePiReasoningCapability(channel.provider, selectedModelId)
-      const piThinkingLevel = resolvePiThinkingLevel(appSettings, sessionMeta, channel.provider, selectedModelId, piReasoningCapability)
+      const piThinkingLevel = resolvePiThinkingLevel(
+        appSettings,
+        sessionMeta,
+        channel.provider,
+        selectedModelId,
+        piReasoningCapability,
+        selectedModelConfig,
+      )
       const projectInstructions = workspaceSlug
         ? (() => {
             try {
@@ -1674,6 +1682,7 @@ export class AgentOrchestrator {
             openAIThinkingLevel: piThinkingLevel!,
           }),
         thinkingLevel: piThinkingLevel!,
+        ...(selectedModelConfig ? { modelConfig: selectedModelConfig } : {}),
         ...(appSettings.agentMaxBudgetUsd != null && appSettings.agentMaxBudgetUsd > 0 && {
           maxBudgetUsd: appSettings.agentMaxBudgetUsd,
         }),

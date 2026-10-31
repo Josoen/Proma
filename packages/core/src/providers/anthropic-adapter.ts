@@ -321,6 +321,13 @@ export class AnthropicAdapter implements ProviderAdapter {
     } else {
       maxTokens = 32000
     }
+    if (input.maxTokens && input.maxTokens > 0) {
+      // Anthropic 的 thinking budget 必须小于 max_tokens，配置值过小时保留协议安全下限。
+      const thinkingFloor = input.thinkingEnabled && capability.mode === 'manual-only'
+        ? manualThinkingBudget + 1
+        : 1
+      maxTokens = Math.max(input.maxTokens, thinkingFloor)
+    }
 
     const body: Record<string, unknown> = {
       model: input.modelId,

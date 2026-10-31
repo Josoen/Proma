@@ -247,6 +247,7 @@ export class OpenAIResponsesAdapter implements ProviderAdapter {
       input: toResponsesInput(input),
       stream: true,
     }
+    if (input.maxTokens && input.maxTokens > 0) bodyObj.max_output_tokens = input.maxTokens
 
     if (input.tools && input.tools.length > 0) {
       bodyObj.tools = toResponsesTools(input.tools)

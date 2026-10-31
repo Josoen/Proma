@@ -37,6 +37,7 @@ import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai/compat'
 import type { PiAgentQueryOptions } from './pi-agent-adapter'
 import { rememberXaiOAuthCredentials, refreshXaiOAuthCredentialsSerial } from '../xai-oauth-credentials'
 import { supportsPiDeveloperRole } from './pi-provider-compat'
+import { lookupModelsDevModel } from '../models-dev-catalog'
 
 type PiSdk = typeof import('@earendil-works/pi-coding-agent')
 type PiAiCompat = typeof import('@earendil-works/pi-ai/compat')
@@ -693,6 +694,9 @@ export async function resolvePiReasoningCapability(
 
 async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
+  const modelsDevModel = input.model
+    ? await lookupModelsDevModel({ provider: input.provider, baseUrl: input.baseUrl ?? '', modelId: input.model })
+    : undefined
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
   const api = resolvePiApi(input.provider)
   const providerSpecificCapabilities = compilePiReasoningCapabilities(api, input.model)
@@ -704,7 +708,10 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
   // MiMo-V2.6 刚发布，Pi catalog 未收录时仍按官方规格注册，避免回落到 64K 默认值。
   // 家族判定复用 shared 的精确 ID 列表，避免 startsWith 宽匹配误伤未来 ID（如 mimo-v2.60）。
   const isCatalogMissingMimoV26Family = !catalogModel && isMimoV26Model(glmModelId)
-  const catalogContextWindow = catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+  const modelConfig = input.modelConfig
+  const catalogContextWindow = modelsDevModel?.source === 'models.dev'
+    ? (modelsDevModel.contextWindow ?? DEFAULT_CONTEXT_WINDOW)
+    : (catalogModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW)
   const inferredContextWindow = inferContextWindow(input.model) ?? DEFAULT_CONTEXT_WINDOW
   const shouldForceAdaptiveThinking = shouldForcePiAdaptiveThinking(api, catalogModel, input.model)
   return {
@@ -718,16 +725,27 @@ async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiMod
     input: catalogModel ? [...catalogModel.input] : ['text', 'image'],
     cost: catalogModel ? { ...catalogModel.cost } : { ...ZERO_MODEL_COST },
     // Codex 对齐策略优先；其他模型仍保留 catalog 与 shared inference 中更大的已验证能力。
-    contextWindow: codexAlignedCapabilities?.contextWindow ?? Math.max(catalogContextWindow, inferredContextWindow),
+    contextWindow: (modelConfig?.contextWindowSource === 'user'
+      || (modelConfig?.contextWindowSource === undefined && modelConfig?.contextWindow)) && modelConfig?.contextWindow
+      ? modelConfig.contextWindow
+      : codexAlignedCapabilities?.contextWindow
+        ?? (modelsDevModel?.source === 'models.dev' && modelsDevModel.contextWindow
+          ? modelsDevModel.contextWindow
+          : Math.max(catalogContextWindow, inferredContextWindow)),
     // Pi catalog 缺少时，GLM-5.3 系列仍按官方 128K 输出上限注册。
     maxTokens: isVolcengineGlm5x
       ? VOLCENGINE_GLM_MAX_TOKENS
-      : (catalogModel?.maxTokens
+      : ((modelConfig?.maxTokensSource === 'user'
+        || (modelConfig?.maxTokensSource === undefined && modelConfig?.maxTokens)) && modelConfig?.maxTokens
+        ? modelConfig.maxTokens
+        : (modelsDevModel?.source === 'models.dev' && modelsDevModel.maxTokens
+          ? modelsDevModel.maxTokens
+          : (catalogModel?.maxTokens
         ?? (isCatalogMissingGlm53Family
           ? GLM_53_FAMILY_MAX_TOKENS
           : isCatalogMissingMimoV26Family
             ? MIMO_V26_FAMILY_MAX_TOKENS
-            : DEFAULT_MAX_TOKENS)),
+            : DEFAULT_MAX_TOKENS)))),
   }
 }
 

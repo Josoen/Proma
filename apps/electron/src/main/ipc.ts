@@ -38,6 +38,10 @@ import type {
   ChannelDirectTestInput,
   FetchModelsInput,
   FetchModelsResult,
+  ModelsDevLookupInput,
+  ModelsDevLookupManyResult,
+  ModelsDevLookupResult,
+  ModelsDevCatalogStatus,
   ConversationMeta,
   ChatMessage,
   ChatSendInput,
@@ -190,6 +194,7 @@ import {
   getChannelById,
   getChannelPlanQuota,
 } from './lib/channel-manager'
+import { getModelsDevCatalogStatus, lookupModelsDevModel, modelsDevCatalog } from './lib/models-dev-catalog'
 import { loginCodexOAuth, cancelCodexOAuthLogin } from './lib/codex-oauth-service'
 import { loginGithubCopilotOAuth, cancelGithubCopilotOAuthLogin } from './lib/github-copilot-oauth-service'
 import { loginXaiOAuth, cancelXaiOAuthLogin } from './lib/xai-oauth-service'
@@ -1783,6 +1788,38 @@ export function registerIpcHandlers(): void {
     async (_, input: FetchModelsInput): Promise<FetchModelsResult> => {
       return fetchModels(input)
     }
+  )
+
+  // models.dev 只提供模型默认元数据，不接收供应商凭据。
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.MODELS_DEV_STATUS,
+    async (): Promise<ModelsDevCatalogStatus> => {
+      await modelsDevCatalog.ensureLoaded()
+      return getModelsDevCatalogStatus()
+    },
+  )
+
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.MODELS_DEV_REFRESH,
+    async (): Promise<ModelsDevCatalogStatus> => modelsDevCatalog.refresh(),
+  )
+
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.MODELS_DEV_LOOKUP,
+    async (_, input: ModelsDevLookupInput): Promise<ModelsDevLookupResult> => ({
+      info: await lookupModelsDevModel(input),
+    }),
+  )
+
+  ipcMain.handle(
+    CHANNEL_IPC_CHANNELS.MODELS_DEV_LOOKUP_MANY,
+    async (_, inputs: ModelsDevLookupInput[]): Promise<ModelsDevLookupManyResult> => {
+      const entries = await Promise.all(inputs.map(async (input) => [
+        input.modelId,
+        await lookupModelsDevModel(input),
+      ] as const))
+      return { infos: Object.fromEntries(entries) }
+    },
   )
 
   // 查询订阅 Plan 额度（用于 Agent Context 圆环 hover 信息）

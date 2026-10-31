@@ -222,6 +222,8 @@ export interface StreamRequestInput {
   thinkingEnabled?: boolean
   /** 用户选择的思考深度；适配器应按模型能力安全归一化。 */
   thinkingLevel?: AgentThinkingLevel
+  /** 模型级最大输出限制；未设置时沿用适配器当前默认值。 */
+  maxTokens?: number
   /** 工具定义列表（可选，启用 function calling） */
   tools?: ToolDefinition[]
   /** 工具续接消息（tool use 循环中，前一轮的 tool_use + tool_result） */
