@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
 import { serializeCodexCredentials } from '@proma/shared'
@@ -67,6 +67,28 @@ afterAll(() => {
 })
 
 describe('渠道运行时认证解析', () => {
+  test('Given 历史火山套餐和当前 API 渠道 When 读取配置 Then 清理退休渠道并保留 API 渠道', () => {
+    writeChannels(['doubao', 'ark-coding-plan', 'doubao-api'].map((provider) => ({
+      id: provider,
+      name: provider,
+      provider,
+      baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      apiKey: 'test-key',
+      models: [],
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    })))
+
+    expect(channelManager.getChannelById('doubao')).toBeUndefined()
+    expect(channelManager.getChannelById('ark-coding-plan')).toBeUndefined()
+    expect(channelManager.getChannelById('doubao-api')?.provider).toBe('doubao-api')
+    const saved = JSON.parse(readFileSync(join(tempHome, '.proma', 'channels.json'), 'utf-8')) as {
+      channels: Array<{ id: string }>
+    }
+    expect(saved.channels.map((channel) => channel.id)).toEqual(['doubao-api'])
+  })
+
   test('Given ChatGPT OAuth 渠道 When 解析运行时 key Then 返回 access token 而不是凭据 JSON', async () => {
     writeChannels([
       {
