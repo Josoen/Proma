@@ -58,7 +58,7 @@ Proma 是一款为专业用户打造的开源通用的桌面端 Agent 产品。�
 
 ### 开源版下载
 
-从 [GitHub Releases](https://github.com/proma-ai/Proma/releases) 下载开源版本，提供 macOS Apple Silicon、macOS Intel、Windows、Ubuntu/Debian x86_64 的 `.deb` 安装包和 Linux x86_64 AppImage。Linux 的安装、安全边界和支持范围见 [Linux 说明](./docs/linux.md)。
+从 [GitHub Releases](https://github.com/Josoen/Proma/releases) 下载开源版本，提供 macOS Apple Silicon、Windows、Ubuntu/Debian x86_64 的 `.deb` 安装包和 Linux x86_64 AppImage。Linux 的安装、安全边界和支持范围见 [Linux 说明](./docs/linux.md)。
 
 
 

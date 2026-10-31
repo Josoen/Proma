@@ -16,7 +16,7 @@ export const DEFAULT_GIT_ATTRIBUTION_ENABLED = true
 export const PROMA_OFFICIAL_URL = 'https://proma.cool'
 
 /** 开源仓库完整地址 */
-export const PROMA_GITHUB_URL = 'https://github.com/proma-ai/Proma'
+export const PROMA_GITHUB_URL = 'https://github.com/Josoen/Proma'
 
 /** Commit trailer（标准 git trailer，不进入 GitHub co-author 列表） */
 export const PROMA_COMMIT_TRAILER = 'Made-with: Proma'

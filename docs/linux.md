@@ -9,7 +9,7 @@ Proma 第一版 Linux 发布目标是 **Ubuntu 22.04 x86_64**，提供：
 
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/proma-ai/Proma/releases) 下载对应版本：
+从 [GitHub Releases](https://github.com/Josoen/Proma/releases) 下载对应版本：
 
 ```bash
 # deb：推荐

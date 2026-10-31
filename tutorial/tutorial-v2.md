@@ -60,7 +60,7 @@ BTW，这篇内容很长很长，Erlich 专属加持鼓励！这确实是个说�
 
 ### 下载和安装
 
-**Proma 开源下载地址：https://github.com/proma-ai/Proma/releases **
+**Proma 开源下载地址：https://github.com/Josoen/Proma/releases **
 
 **Proma 商业版下载地址：https://proma.cool/download **
 

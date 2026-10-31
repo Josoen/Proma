@@ -38,7 +38,7 @@ Proma adds focused capabilities for professional workflows so Agents can operate
 
 ### Download the Open-Source Edition
 
-Download the open-source edition from [GitHub Releases](https://github.com/proma-ai/Proma/releases). Builds are available for macOS Apple Silicon, macOS Intel, Windows, Ubuntu/Debian x86_64 (`.deb`), and Linux x86_64 AppImage. For Linux installation, security boundaries, and support scope, see the [Linux guide](./docs/linux.md).
+Download the open-source edition from [GitHub Releases](https://github.com/Josoen/Proma/releases). Builds are available for macOS Apple Silicon, Windows, Ubuntu/Debian x86_64 (`.deb`), and Linux x86_64 AppImage. For Linux installation, security boundaries, and support scope, see the [Linux guide](./docs/linux.md).
 
 ### Download the Commercial Edition
 
