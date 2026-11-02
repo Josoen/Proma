@@ -45,10 +45,8 @@ import { getActiveRunRejectionMessage, shouldPersistInitialUserMessage } from '.
 import { isSessionNotFoundError } from './error-patterns'
 import { AgentEventBus } from './agent-event-bus'
 import { isStaleActiveQueueError } from './agent-queue-routing'
-import { decryptApiKey, getChannelById, listChannels, persistCodexOAuthCredentials, persistGithubCopilotOAuthCredentials, persistXaiOAuthCredentials, resolveChannelRuntimeApiKey, resolveCodexOAuthCredentials, resolveGithubCopilotOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
-import { getAdapter, fetchTitle } from '@proma/core'
+import { decryptApiKey, getChannelById, persistCodexOAuthCredentials, persistGithubCopilotOAuthCredentials, persistXaiOAuthCredentials, resolveCodexOAuthCredentials, resolveGithubCopilotOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import pkg from '../../../package.json' with { type: 'json' }
-import { getFetchFn } from './proxy-fetch'
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting } from './agent-session-manager'
 import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
@@ -78,8 +76,9 @@ import { isVisibleRunMessage } from './agent-run-message-visibility'
 import { resolvePiThinkingLevel } from './agent-thinking-level'
 import { lookupModelsDevModel } from './models-dev-catalog'
 import { resolvePiReasoningCapability } from './adapters/pi-model-registry'
-import { generateCodexTitle } from './adapters/pi-codex-title-generator'
-import { createFallbackTitle, sanitizeGeneratedTitle, TITLE_PROMPT } from './title-generation'
+import { generatePiTitle } from './adapters/pi-title-generator'
+import { generateSessionTitle } from './session-title-service'
+import { createFallbackTitle } from './title-generation'
 import { claimWorkspaceMemoryRefreshOpportunity } from './agent-memory-refresh-service'
 import { browserController } from './browser-controller'
 import { resolveRuntimeAdditionalDirectories } from './agent-orchestrator-vault-access'
@@ -220,6 +219,7 @@ export class AgentOrchestrator {
   private adapter: AgentProviderAdapter
   private eventBus: AgentEventBus
   private activeSessions = new Map<string, number>()
+  private titleGeneratingSessions = new Set<string>()
   private activeSessionStartedAt = new Map<string, number>()
   private nextRunGenerationBySession = new Map<string, number>()
 
@@ -312,91 +312,13 @@ export class AgentOrchestrator {
   /**
    * 生成 Agent 会话标题
    *
-   * 使用 Provider 适配器系统，支持所有渠道。任何错误返回 null。
+   * 独立标题模型使用固定 Prompt 和关闭思考的单次 Pi 请求；失败使用本地标题。
    */
   async generateTitle(input: AgentGenerateTitleInput, signal?: AbortSignal): Promise<string | null> {
-    const { userMessage, channelId, modelId } = input
-    if (signal?.aborted) return null
-    console.log('[Agent 标题生成] 开始生成标题:', { channelId, modelId, userMessage: userMessage.slice(0, 50) })
-
-    // 渠道信息在异常路径也要用于判断是否应用自定义渠道本地兜底，因此提前解析；
-    // 同时保留 listChannels 自身的错误边界：解析失败时按“无渠道”处理并返回 null。
-    let channel: import('@proma/shared').Channel | undefined
-    try {
-      channel = listChannels().find((c) => c.id === channelId)
-    } catch (error) {
-      console.warn('[Agent 标题生成] 渠道解析失败:', error)
-      return null
-    }
-    if (!channel) {
-      console.warn('[Agent 标题生成] 渠道不存在:', channelId)
-      return null
-    }
-
-    if (channel.provider === 'xai' || channel.provider === 'github-copilot') {
-      // Subscription providers use Pi's provider-specific OAuth transport; title generation's
-      // generic channel adapter only understands API keys, so retain a local deterministic title.
-      return createFallbackTitle(userMessage)
-    }
-
-    if (channel.provider === 'openai-codex') {
-      const fallbackTitle = createFallbackTitle(userMessage)
-      try {
-        const [credentials, proxyUrl] = await Promise.all([
-          resolveCodexOAuthCredentials(channelId),
-          getEffectiveProxyUrl(),
-        ])
-        if (signal?.aborted) return null
-        const generatedTitle = await generateCodexTitle({
-          modelId,
-          prompt: TITLE_PROMPT + userMessage,
-          credentials,
-          proxyUrl,
-          signal,
-          onCredentialsRefreshed: (refreshed) => persistCodexOAuthCredentials(channelId, refreshed),
-        })
-        if (signal?.aborted) return null
-        const title = generatedTitle ? sanitizeGeneratedTitle(generatedTitle) : null
-        if (title) {
-          console.log(`[Agent 标题生成] ChatGPT OAuth 语义标题生成成功: "${title}"`)
-          return title
-        }
-        console.warn('[Agent 标题生成] ChatGPT OAuth 返回空标题，使用本地兜底')
-      } catch (error) {
-        if (signal?.aborted) return null
-        console.warn('[Agent 标题生成] ChatGPT OAuth 语义标题生成失败，使用本地兜底:', error)
-      }
-      return fallbackTitle
-    }
-
-    try {
-      const apiKey = await resolveChannelRuntimeApiKey(channelId)
-      const providerAdapter = getAdapter(channel.provider)
-      const request = providerAdapter.buildTitleRequest({
-        baseUrl: channel.baseUrl,
-        apiKey,
-        modelId,
-        prompt: TITLE_PROMPT + userMessage,
-      })
-
-      const proxyUrl = await getEffectiveProxyUrl()
-      const fetchFn = getFetchFn(proxyUrl)
-      const title = await fetchTitle(request, providerAdapter, fetchFn)
-      const result = title ? sanitizeGeneratedTitle(title) : null
-      if (!result) {
-        console.warn('[Agent 标题生成] API 未返回可用标题')
-        // 自定义渠道（custom）可能返回空/异常；任何取不到可用标题的情况
-        // 都回退到首行兜底，保证会话一定被重命名。
-        return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
-      }
-
-      console.log(`[Agent 标题生成] 生成标题成功: "${result}"`)
-      return result
-    } catch (error) {
-      console.warn('[Agent 标题生成] 生成失败:', error)
-      // 自定义渠道的服务端偶发返回空标题/异常响应/超时，异常路径同样要完成重命名。
-      return (channel.provider === 'custom') ? createFallbackTitle(userMessage) : null
-    }
+    return generateSessionTitle(input, getSettings().sessionTitle, {
+      getChannel: getChannelById,
+      complete: generatePiTitle,
+    }, signal)
   }
 
   /**
@@ -413,7 +335,8 @@ export class AgentOrchestrator {
     callbacks: SessionCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (signal?.aborted) return
+    if (signal?.aborted || isAgentSessionDeleting(sessionId) || this.titleGeneratingSessions.has(sessionId)) return
+    this.titleGeneratingSessions.add(sessionId)
     try {
       const meta = getAgentSessionMeta(sessionId)
       if (!meta) return
@@ -433,7 +356,7 @@ export class AgentOrchestrator {
 
       const title = await this.generateTitle({ userMessage, channelId, modelId }, signal)
         ?? (isFirstExplorationMessage ? createFallbackTitle(userMessage) : null)
-      if (!title || signal?.aborted) return
+      if (!title || signal?.aborted || isAgentSessionDeleting(sessionId)) return
 
       // 标题请求是异步的；请求期间用户可能已手动重命名，不能用旧结果覆盖。
       const latestMeta = getAgentSessionMeta(sessionId)
@@ -451,6 +374,8 @@ export class AgentOrchestrator {
     } catch (error) {
       if (signal?.aborted) return
       console.warn('[Agent 编排] 自动标题生成失败:', error)
+    } finally {
+      this.titleGeneratingSessions.delete(sessionId)
     }
   }
 
@@ -1573,7 +1498,7 @@ export class AgentOrchestrator {
         if (titleGenerationStarted) return
         titleGenerationStarted = true
 
-        // 标题请求与前台 Agent run 使用独立的 Codex Responses 请求，可并发执行。
+        // 标题使用独立的 Pi 单次请求及可选的专用模型，与前台 Agent run 并发执行。
         // 自动标题只会写入仍为默认名称的会话，因此不会覆盖用户的手动重命名。
         // 标题优先基于用户原文；Bridge 追加的来源标记等 Agent 运行上下文不应出现在标题中。
         this.autoGenerateTitle(sessionId, rawUserMessage ?? userMessage, channelId, resolvedModel, callbacks)

@@ -5,11 +5,13 @@
  * 存储在 ~/.proma/settings.json
  */
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { getSettingsPath } from './config-paths'
 import { DEFAULT_THEME_MODE, normalizeProductivityToolsSettings } from '../../types'
 import type { AgentIslandSettings, AppSettings } from '../../types'
 import { getTerminalProfilesForPlatform, isTerminalProfile } from '@proma/shared'
+import { validateSessionTitleSettings } from '../../types/session-title'
+import { writeJsonFileAtomic } from './safe-file'
 
 function sanitizeAgentIslandSettings(input: unknown): AgentIslandSettings | undefined {
   if (!input || typeof input !== 'object') return undefined
@@ -120,6 +122,7 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
   const updated: AppSettings = {
     ...current,
     ...updates,
+    ...(updates.sessionTitle !== undefined && { sessionTitle: validateSessionTitleSettings(updates.sessionTitle) }),
     // 仅保留 macOS 原生 Island 开关，避免旧非原生 surface 字段被继续回写。
     agentIsland: updates.agentIsland === undefined
       ? sanitizeAgentIslandSettings(current.agentIsland)
@@ -131,7 +134,7 @@ export function updateSettings(updates: Partial<AppSettings>): AppSettings {
   const filePath = getSettingsPath()
 
   try {
-    writeFileSync(filePath, JSON.stringify(updated, null, 2), 'utf-8')
+    writeJsonFileAtomic(filePath, updated)
     console.log('[设置] 已更新 keys:', Object.keys(updates).join(', '))
   } catch (error) {
     console.error('[设置] 写入失败:', error)

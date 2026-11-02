@@ -194,6 +194,11 @@ export interface GithubCopilotModelInput {
   onGithubCopilotOAuthCredentialsRefreshed?: (credentials: GithubCopilotOAuthCredentials) => void | Promise<void>
 }
 
+/** 单次补全也可构建模型，不要求工具、权限或会话目录。 */
+export interface PiModelBuildInput extends Pick<PiAgentQueryOptions,
+  'sessionId' | 'provider' | 'apiKey' | 'baseUrl' | 'channelId' | 'channelName' | 'model' | 'modelConfig' | 'modelsDevModel'
+>, CodexModelInput, XaiModelInput, GithubCopilotModelInput {}
+
 function createCodexRuntimeCredentialStore(
   initial: CodexOAuthCredentials,
   onRefreshed?: PiAgentQueryOptions['onCodexOAuthCredentialsRefreshed'],
@@ -707,7 +712,7 @@ export async function resolvePiReasoningCapability(
   return resolved
 }
 
-async function resolvePiModelDefaults(input: PiAgentQueryOptions): Promise<PiModelDefaults> {
+async function resolvePiModelDefaults(input: PiModelBuildInput): Promise<PiModelDefaults> {
   const catalogModel = input.model ? await findPiCatalogModel(input.provider, input.model) : undefined
   const modelsDevModel = input.modelsDevModel
   const codexAlignedCapabilities = getCodexAlignedGPT5Capabilities(input.model)
@@ -904,7 +909,7 @@ export async function getCodexCatalogModels(): Promise<PiCatalogModel[]> {
  * 因此将 Proma 已刷新过的完整凭据放入一次性内存 OAuth credential store，
  * 按真实 expires 刷新并回写 Proma，避免读写全局 ~/.pi 认证文件。
  */
-export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
+export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput, isolated = false) {
   if (!input.codexOAuthCredentials) {
     throw new Error('ChatGPT (Codex) OAuth 凭据缺失，请重新登录')
   }
@@ -915,6 +920,7 @@ export async function buildCodexModel(sdk: PiSdk, input: CodexModelInput) {
       input.onCodexOAuthCredentialsRefreshed,
     ),
     allowModelNetwork: false,
+    ...(isolated && { modelsPath: null }),
   })
 
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
@@ -963,7 +969,7 @@ export async function getXaiCatalogModels(): Promise<PiCatalogModel[]> {
  * xAI 的 device-code token 不等同于 xAI API key，必须注入内存 CredentialStore
  * 并使用内置 `xai` provider，不能退回 registerProvider() 的 API key 路径。
  */
-export async function buildXaiModel(sdk: PiSdk, input: XaiModelInput) {
+export async function buildXaiModel(sdk: PiSdk, input: XaiModelInput, isolated = false) {
   if (!input.xaiOAuthCredentials || !input.channelId) {
     throw new Error('xAI OAuth 凭据或渠道标识缺失，请重新登录')
   }
@@ -974,6 +980,7 @@ export async function buildXaiModel(sdk: PiSdk, input: XaiModelInput) {
       input.onXaiOAuthCredentialsRefreshed,
     ),
     allowModelNetwork: false,
+    ...(isolated && { modelsPath: null }),
   })
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
   const xaiModels = await getXaiCatalogModels()
@@ -1000,7 +1007,7 @@ export async function getGithubCopilotCatalogModels(): Promise<PiCatalogModel[]>
  * GitHub Copilot 的模型可见性由订阅套餐、组织策略和已启用模型决定。
  * 因此必须用携带凭据的 ModelRuntime 读取过滤后的目录，不能退回全量 catalog。
  */
-export async function buildGithubCopilotModel(sdk: PiSdk, input: GithubCopilotModelInput) {
+export async function buildGithubCopilotModel(sdk: PiSdk, input: GithubCopilotModelInput, isolated = false) {
   if (!input.githubCopilotOAuthCredentials) {
     throw new Error('GitHub Copilot 登录凭据无效或缺失，请重新登录')
   }
@@ -1010,6 +1017,7 @@ export async function buildGithubCopilotModel(sdk: PiSdk, input: GithubCopilotMo
       input.onGithubCopilotOAuthCredentialsRefreshed,
     ),
     allowModelNetwork: false,
+    ...(isolated && { modelsPath: null }),
   })
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
   const availableModels = await modelRuntime.getAvailable('github-copilot')
@@ -1033,24 +1041,28 @@ export async function listGithubCopilotModels(credentials: GithubCopilotOAuthCre
   return (await modelRuntime.getAvailable('github-copilot')).map((model) => ({ id: model.id, name: model.name }))
 }
 
-export async function buildModel(sdk: PiSdk, input: PiAgentQueryOptions) {
+export async function buildModel(sdk: PiSdk, input: PiModelBuildInput, isolated = false) {
   if (input.provider === 'opencode-go-openai') {
     throw new Error('OpenCode Go 渠道已停用，请选择其他渠道')
   }
   if (input.provider === 'openai-codex') {
-    return buildCodexModel(sdk, input)
+    return buildCodexModel(sdk, input, isolated)
   }
   if (input.provider === 'xai') {
-    return buildXaiModel(sdk, input)
+    return buildXaiModel(sdk, input, isolated)
   }
   if (input.provider === 'github-copilot') {
-    return buildGithubCopilotModel(sdk, input)
+    return buildGithubCopilotModel(sdk, input, isolated)
   }
   const providerName = `proma-${input.provider}-${input.sessionId}`
   const resolvedApiKey = resolvePiApiKey(input.provider, input.apiKey)
   // pi runtime 统一剥离历史 `[1m]` 后缀：无论上游从哪条路径传入，注册与查找都用干净 ID。
   const resolvedModelId = stripLegacyAgentSdkContextSuffix(input.model)
-  const modelRuntime = await sdk.ModelRuntime.create({ allowModelNetwork: false })
+  const { InMemoryCredentialStore } = await loadPiAiCompat()
+  const modelRuntime = await sdk.ModelRuntime.create({
+    allowModelNetwork: false,
+    ...(isolated && { credentials: new InMemoryCredentialStore(), modelsPath: null }),
+  })
   const modelDefaults = await resolvePiModelDefaults({ ...input, model: resolvedModelId })
   const api = modelDefaults.api
   const baseUrl = normalizePiBaseUrl(input.baseUrl, input.provider, api)

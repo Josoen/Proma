@@ -5,6 +5,8 @@
  */
 
 import type { EnvironmentCheckResult, ThinkingConfig, AgentEffort, AgentThinkingLevel, FeishuSessionMirrorSettings, TerminalProfile, WindowsShellPreference } from '@proma/shared'
+import type { SessionTitleSettings } from './session-title'
+export type { SessionTitleSettings } from './session-title'
 
 /** 通知音场景类型 */
 export type NotificationSoundType = 'taskComplete' | 'permissionRequest' | 'exitPlanMode' | 'planningReminder'
@@ -359,6 +361,8 @@ export interface AppSettings {
   feishuSessionMirror?: FeishuSessionMirrorSettings
   /** 无视觉输入能力 Agent 的视觉助手路由 */
   visionRelay?: VisionRelaySettings
+  /** Agent 独立标题模型；缺省跟随当前会话，Prompt 与思考策略固定在代码中。 */
+  sessionTitle?: SessionTitleSettings
   /** 已确认的受管浏览器风险告知版本；低于当前版本时首次使用会再次要求确认。 */
   browserRiskDisclaimerVersion?: number
   /** Todo、日程与 Obsidian 的可见性和 Agent 工具注入开关，默认全部开启。 */
