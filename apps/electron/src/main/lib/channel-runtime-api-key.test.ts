@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import * as os from 'node:os'
 import { join } from 'node:path'
 import { serializeCodexCredentials } from '@proma/shared'
+import { writeJsonFileAtomic } from './safe-file'
 
 type ChannelManagerModule = typeof import('./channel-manager')
 
@@ -34,11 +35,7 @@ mock.module('node:os', () => ({
 function writeChannels(channels: unknown[]): void {
   const configDir = join(tempHome, '.proma')
   mkdirSync(configDir, { recursive: true })
-  writeFileSync(
-    join(configDir, 'channels.json'),
-    JSON.stringify({ version: 2, channels }),
-    'utf-8',
-  )
+  writeJsonFileAtomic(join(configDir, 'channels.json'), { version: 2, channels })
 }
 
 beforeAll(async () => {
@@ -64,6 +61,49 @@ afterAll(() => {
     process.env.PROMA_DEV = originalPromaDev
   }
   rmSync(tempHome, { recursive: true, force: true })
+})
+
+describe('默认 DeepSeek 渠道生命周期', () => {
+  test('Given 首次使用且没有配置文件 When 获取渠道列表 Then 仅创建一个未启用的 DeepSeek 预设', () => {
+    expect(existsSync(join(tempHome, '.proma', 'channels.json'))).toBe(false)
+    const channels = channelManager.listChannels()
+    expect(channels).toHaveLength(1)
+    expect(channels[0]).toMatchObject({ name: 'DeepSeek', provider: 'deepseek', enabled: false })
+    expect(channelManager.listChannels().map((channel) => channel.id)).toEqual([channels[0]!.id])
+  })
+
+  test('Given 默认 DeepSeek 已创建 When 删除并刷新或重启 Then 保持空列表而不重新创建', () => {
+    const preset = channelManager.listChannels()[0]!
+    channelManager.deleteChannel(preset.id)
+    expect(channelManager.getChannelById(preset.id)).toBeUndefined()
+    expect(channelManager.listChannels()).toEqual([])
+    expect(channelManager.listChannels()).toEqual([])
+    const script = `
+      import { mock } from 'bun:test';
+      import * as os from 'node:os';
+      import { strict as assert } from 'node:assert';
+      mock.module('node:os', () => ({ ...os, homedir: () => ${JSON.stringify(tempHome)} }));
+      mock.module('electron', () => ({ app: { isPackaged: true }, safeStorage: { isEncryptionAvailable: () => false }, shell: {} }));
+      const { listChannels } = await import('./apps/electron/src/main/lib/channel-manager');
+      assert.deepEqual(listChannels(), []);
+    `
+    const result = Bun.spawnSync([process.execPath, '-e', script], { cwd: process.cwd(), stdout: 'pipe', stderr: 'pipe' })
+    expect({ exitCode: result.exitCode, stderr: result.stderr.toString() }).toMatchObject({ exitCode: 0 })
+  })
+
+  test('Given 已有空配置文件 When 获取渠道列表 Then 尊重已保存的空列表', () => {
+    writeChannels([])
+    expect(channelManager.listChannels()).toEqual([])
+    expect(existsSync(join(tempHome, '.proma', 'channels.json'))).toBe(true)
+  })
+
+  test('Given 已有其他供应商配置 When 获取渠道列表 Then 保留用户渠道而不补建 DeepSeek', () => {
+    writeChannels([{
+      id: 'user-channel', name: '我的 API', provider: 'openai', baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'test-key', models: [], enabled: true, createdAt: 1, updatedAt: 1,
+    }])
+    expect(channelManager.listChannels().map((channel) => channel.id)).toEqual(['user-channel'])
+  })
 })
 
 describe('渠道运行时认证解析', () => {

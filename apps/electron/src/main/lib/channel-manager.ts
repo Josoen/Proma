@@ -509,16 +509,13 @@ function decryptKey(encryptedKey: string): string {
  * 获取所有渠道
  *
  * 返回的渠道中 apiKey 保持加密状态。
- * 首次调用时，如果没有任何 DeepSeek 渠道，自动创建预设渠道。
+ * 仅在尚无渠道配置文件时创建 DeepSeek 预设；已有配置尊重用户的删除结果。
  */
 export function listChannels(): Channel[] {
+  const isFirstUse = !existsSync(getChannelsPath())
   const config = readConfig()
 
-  // 首次使用：如果没有 DeepSeek 渠道，自动创建预设
-  const hasDeepSeek = config.channels.some(
-    (c) => c.provider === 'deepseek' || c.baseUrl.includes('api.deepseek.com'),
-  )
-  if (!hasDeepSeek) {
+  if (isFirstUse) {
     const now = Date.now()
     const presetChannel: Channel = {
       id: randomUUID(),
