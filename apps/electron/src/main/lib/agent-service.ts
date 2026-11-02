@@ -20,6 +20,7 @@ import { AGENT_IPC_CHANNELS, MAX_ATTACHMENT_SIZE } from '@proma/shared'
 import type {
   AgentSendInput,
   AgentGenerateTitleInput,
+  AgentSessionMeta,
   AgentSaveFilesInput,
   AgentSaveWorkspaceFilesInput,
   AgentSavedFile,
@@ -545,6 +546,14 @@ export async function runAgentHeadless(
  */
 export async function generateAgentTitle(input: AgentGenerateTitleInput): Promise<string | null> {
   return orchestrator.generateTitle(input)
+}
+
+export async function regenerateAgentSessionTitle(sessionId: string): Promise<AgentSessionMeta> {
+  const updated = await orchestrator.regenerateTitle(sessionId)
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(AGENT_IPC_CHANNELS.TITLE_UPDATED, { sessionId, title: updated.title })
+  }
+  return updated
 }
 
 /**

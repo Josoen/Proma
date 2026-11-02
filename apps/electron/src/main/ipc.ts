@@ -217,6 +217,7 @@ import {
   searchConversationSessionMessages,
 } from './lib/conversation-manager'
 import { sendMessage, stopGeneration, generateTitle } from './lib/chat-service'
+import { regenerateAgentSessionTitle } from './lib/agent-service'
 import {
   saveAttachment,
   readAttachmentAsBase64,
@@ -2741,6 +2742,14 @@ export function registerIpcHandlers(): void {
     async (_, input: AgentGenerateTitleInput): Promise<string | null> => {
       return generateAgentTitle(input)
     }
+  )
+
+  ipcMain.handle(
+    AGENT_IPC_CHANNELS.REGENERATE_TITLE,
+    async (_, sessionId: string): Promise<AgentSessionMeta> => {
+      if (typeof sessionId !== 'string' || !sessionId.trim()) throw new Error('无效的会话 ID')
+      return regenerateAgentSessionTitle(sessionId)
+    },
   )
 
   // 删除 Agent 会话

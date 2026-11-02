@@ -14,6 +14,7 @@ export async function generateSessionTitle(
   settings: SessionTitleSettings | undefined,
   dependencies: SessionTitleDependencies,
   signal?: AbortSignal,
+  fallbackToLocal = true,
 ): Promise<string | null> {
   if (signal?.aborted || !input.userMessage.trim()) return null
   let channelId = input.channelId
@@ -37,13 +38,13 @@ export async function generateSessionTitle(
     ))
     if (signal?.aborted) return null
     if (title) return title
-    console.warn('[Agent 标题生成] 返回空标题:', { channelId, modelId })
+    console.warn('[Agent 标题生成] 返回空标题:', { channelId, modelId, fallbackToLocal })
   } catch (error) {
     if (signal?.aborted) return null
     // 不输出供应商异常正文，避免回显 Prompt 或认证请求内容。
     console.warn('[Agent 标题生成] 配置或模型请求失败:', {
-      channelId, modelId, phase, reason, errorType: error instanceof Error ? error.name : 'unknown',
+      channelId, modelId, phase, reason, fallbackToLocal, errorType: error instanceof Error ? error.name : 'unknown',
     })
   }
-  return createFallbackTitle(input.userMessage)
+  return fallbackToLocal ? createFallbackTitle(input.userMessage) : null
 }

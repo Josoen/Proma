@@ -88,6 +88,60 @@ describe('Agent 自动标题并发与写回', () => {
       await run('retry');
       assert.equal(metas.get('retry').title, '清理后可命名');
 
+      const settings = await import('./apps/electron/src/main/lib/settings-service');
+      spyOn(settings, 'getSettings').mockReturnValue({});
+      const history = spyOn(manager, 'getAgentSessionSDKMessages').mockReturnValue([
+        { type: 'user', isSynthetic: true, message: { content: [{ type: 'text', text: '合成指令' }] } },
+        { type: 'user', parent_tool_use_id: 'tool', message: { content: [{ type: 'text', text: '工具文本' }] } },
+        { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'text', text: '首条用户原文' }] } },
+        { type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'text', text: '第二条用户消息' }] } },
+      ]);
+      const emit = spyOn(orchestrator.eventBus, 'emit');
+      reset();
+      metas.set('manual', { title: '旧标题', channelId: 'saved-channel', modelId: 'saved-model', archived: true, explorationParentSessionId: 'parent' });
+      orchestrator.generateTitle = mock(async () => '重新生成的标题');
+      const regenerated = await orchestrator.regenerateTitle('manual');
+      assert.equal(regenerated.title, '重新生成的标题');
+      assert.equal(regenerated.archived, true);
+      assert.ok(regenerated.explorationTitleInitializedAt);
+      assert.deepEqual(orchestrator.generateTitle.mock.calls[0], [{ userMessage: '首条用户原文', channelId: 'saved-channel', modelId: 'saved-model' }, undefined, false]);
+      assert.equal(emit.mock.calls.length, 1);
+      assert.equal(emit.mock.calls[0][1].event.type, 'title_updated');
+
+      reset(); history.mockReturnValue([]);
+      metas.set('empty', { title: '空会话' });
+      await assert.rejects(orchestrator.regenerateTitle('empty'), /没有用户文本/);
+      assert.equal(write.mock.calls.length, 0);
+      history.mockReturnValue([{ type: 'user', message: { content: [{ type: 'text', text: '原文' }] } }]);
+
+      reset(); metas.set('manual-race', { title: '旧标题' });
+      const manual = Promise.withResolvers();
+      orchestrator.generateTitle = mock(() => manual.promise);
+      const manualRun = orchestrator.regenerateTitle('manual-race');
+      await assert.rejects(orchestrator.regenerateTitle('manual-race'), /正在生成标题/);
+      await run('manual-race');
+      assert.equal(orchestrator.generateTitle.mock.calls.length, 1);
+      metas.set('manual-race', { title: '手动新名称' });
+      manual.resolve('迟到结果');
+      await assert.rejects(manualRun, /已保留最新名称/);
+      assert.equal(write.mock.calls.length, 0);
+
+      reset(); metas.set('manual-fail', { title: '保留原标题' });
+      orchestrator.generateTitle = mock(async () => null);
+      await assert.rejects(orchestrator.regenerateTitle('manual-fail'), /未能生成标题/);
+      assert.equal(metas.get('manual-fail').title, '保留原标题');
+      assert.equal(write.mock.calls.length, 0);
+      orchestrator.generateTitle = mock(async () => '重试成功');
+      assert.equal((await orchestrator.regenerateTitle('manual-fail')).title, '重试成功');
+
+      reset(); metas.set('manual-delete', { title: '旧标题' });
+      const manualDeleted = Promise.withResolvers();
+      orchestrator.generateTitle = mock(() => manualDeleted.promise);
+      const deletedRun = orchestrator.regenerateTitle('manual-delete');
+      deleting.add('manual-delete'); metas.delete('manual-delete');
+      manualDeleted.resolve('迟到结果');
+      await assert.rejects(deletedRun, /会话已删除/);
+      assert.equal(write.mock.calls.length, 0);
       console.log('AUTO_TITLE_RACE_OK');
     `
     const result = Bun.spawnSync([process.execPath, '-e', script], { cwd: process.cwd(), stdout: 'pipe', stderr: 'pipe' })

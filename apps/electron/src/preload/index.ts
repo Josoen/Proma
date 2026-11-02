@@ -661,6 +661,8 @@ export interface ElectronAPI {
 
   /** 生成 Agent 会话标题 */
   generateAgentTitle: (input: AgentGenerateTitleInput) => Promise<string | null>
+  /** 根据会话已有消息重新生成并持久化标题。 */
+  regenerateAgentSessionTitle: (sessionId: string) => Promise<AgentSessionMeta>
 
   /** 发送 Agent 消息 */
   sendAgentMessage: (input: AgentSendInput) => Promise<void>
@@ -2005,6 +2007,10 @@ const electronAPI: ElectronAPI = {
 
   generateAgentTitle: (input: AgentGenerateTitleInput) => {
     return ipcRenderer.invoke(AGENT_IPC_CHANNELS.GENERATE_TITLE, input)
+  },
+
+  regenerateAgentSessionTitle: (sessionId: string) => {
+    return ipcRenderer.invoke(AGENT_IPC_CHANNELS.REGENERATE_TITLE, sessionId)
   },
 
   sendAgentMessage: (input: AgentSendInput) => {

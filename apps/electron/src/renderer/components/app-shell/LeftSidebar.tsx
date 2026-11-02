@@ -4199,6 +4199,7 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
   onToggleArchive,
 }: AgentSessionItemProps): React.ReactElement {
   const [editing, setEditing] = React.useState(false)
+  const [titleRegenerating, setTitleRegenerating] = React.useState(false)
   const [editTitle, setEditTitle] = React.useState('')
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [rowHovered, setRowHovered] = React.useState(false)
@@ -4236,6 +4237,22 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
       saveTitle()
     } else if (e.key === 'Escape') {
       setEditing(false)
+    }
+  }
+
+  const handleRegenerateTitle = async (): Promise<void> => {
+    if (titleRegenerating) return
+    setTitleRegenerating(true)
+    const toastId = toast.loading('正在重新生成标题…')
+    try {
+      const updated = await window.electronAPI.regenerateAgentSessionTitle(session.id)
+      store.set(agentSessionsAtom, (previous) => replaceAgentSessionInFreshnessOrder(previous, updated))
+      store.set(tabsAtom, (previous) => updateTabTitle(previous, session.id, updated.title))
+      toast.success('会话标题已重新生成', { id: toastId })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '重新生成标题失败', { id: toastId })
+    } finally {
+      setTitleRegenerating(false)
     }
   }
 
@@ -4329,6 +4346,14 @@ const AgentSessionItem = React.memo(function AgentSessionItem({
       <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => startEdit()}>
         <Pencil size={14} />
         重命名
+      </MenuItem>
+      <MenuItem
+        className="text-xs py-1 [&>svg]:size-3.5"
+        disabled={titleRegenerating}
+        onSelect={() => void handleRegenerateTitle()}
+      >
+        {titleRegenerating ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+        {titleRegenerating ? '正在生成标题…' : '重新生成标题'}
       </MenuItem>
       <MenuItem className="text-xs py-1 [&>svg]:size-3.5" onSelect={() => onToggleArchive(session.id)}>
         {session.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}

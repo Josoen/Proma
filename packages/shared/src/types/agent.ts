@@ -1866,6 +1866,8 @@ export const AGENT_IPC_CHANNELS = {
   // 标题生成
   /** 生成 Agent 会话标题 */
   GENERATE_TITLE: 'agent:generate-title',
+  /** 根据已保存的首条用户消息重新生成并更新标题。 */
+  REGENERATE_TITLE: 'agent:regenerate-title',
 
   // 消息发送
   /** 发送消息（触发 Agent 流式响应） */

@@ -36,7 +36,7 @@ import {
   collectSkillActivations,
   mergeSkillActivations,
 } from '@proma/shared'
-import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage } from '@proma/shared'
+import type { PromaPermissionMode, AskUserRequest, ExitPlanModeRequest, SDKSystemMessage, SDKUserMessage } from '@proma/shared'
 import type { PiAgentQueryOptions } from './adapters/pi-agent-adapter'
 import { getMainRepoRoot } from './git-diff-service'
 import { getPiAssistantErrorDetails, hasPiAssistantTextContent, stripPiAssistantError } from './adapters/pi-message-adapter'
@@ -48,7 +48,7 @@ import { isStaleActiveQueueError } from './agent-queue-routing'
 import { decryptApiKey, getChannelById, persistCodexOAuthCredentials, persistGithubCopilotOAuthCredentials, persistXaiOAuthCredentials, resolveCodexOAuthCredentials, resolveGithubCopilotOAuthCredentials, resolveXaiOAuthCredentials } from './channel-manager'
 import pkg from '../../../package.json' with { type: 'json' }
 import { getEffectiveProxyUrl } from './proxy-settings-service'
-import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting } from './agent-session-manager'
+import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting } from './agent-session-manager'
 import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
 import { getMcpApiKeyEnvironment, getMcpOAuthHeaders } from './mcp-oauth-service'
@@ -314,11 +314,53 @@ export class AgentOrchestrator {
    *
    * 独立标题模型使用固定 Prompt 和关闭思考的单次 Pi 请求；失败使用本地标题。
    */
-  async generateTitle(input: AgentGenerateTitleInput, signal?: AbortSignal): Promise<string | null> {
+  async generateTitle(input: AgentGenerateTitleInput, signal?: AbortSignal, fallbackToLocal = true): Promise<string | null> {
     return generateSessionTitle(input, getSettings().sessionTitle, {
       getChannel: getChannelById,
       complete: generatePiTitle,
-    }, signal)
+    }, signal, fallbackToLocal)
+  }
+
+  /** 手动重新生成允许替换已有标题，但不覆盖请求期间的手动重命名。 */
+  async regenerateTitle(sessionId: string): Promise<AgentSessionMeta> {
+    if (this.titleGeneratingSessions.has(sessionId)) throw new Error('该会话正在生成标题，请稍后再试')
+    this.titleGeneratingSessions.add(sessionId)
+    try {
+      const meta = getAgentSessionMeta(sessionId)
+      if (!meta || isAgentSessionDeleting(sessionId)) throw new Error('会话不存在或已删除')
+      let userMessage = ''
+      for (const message of getAgentSessionSDKMessages(sessionId)) {
+        if (message.type !== 'user') continue
+        const user = message as SDKUserMessage
+        if (user.isSynthetic || user.parent_tool_use_id) continue
+        userMessage = (user.message?.content ?? [])
+          .filter((block) => block.type === 'text')
+          .map((block) => 'text' in block && typeof block.text === 'string' ? block.text : '')
+          .join('\n').trim()
+        if (userMessage) break
+      }
+      if (!userMessage) throw new Error('会话还没有用户文本，无法重新生成标题')
+      const settings = getSettings()
+      const title = await this.generateTitle({
+        userMessage,
+        channelId: meta.channelId ?? settings.agentChannelId ?? '',
+        modelId: meta.modelId ?? settings.agentModelId ?? '',
+      }, undefined, false)
+      if (!title) throw new Error('未能生成标题，请稍后重试')
+      const latest = getAgentSessionMeta(sessionId)
+      if (!latest || isAgentSessionDeleting(sessionId)) throw new Error('会话已删除，未更新标题')
+      if (latest.title !== meta.title) throw new Error('会话标题已被修改，已保留最新名称')
+      const updated = updateAgentSessionMeta(sessionId, {
+        title,
+        archived: latest.archived,
+        ...(latest.explorationParentSessionId && !latest.explorationTitleInitializedAt
+          ? { explorationTitleInitializedAt: Date.now() } : {}),
+      })
+      this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'title_updated', title } })
+      return updated
+    } finally {
+      this.titleGeneratingSessions.delete(sessionId)
+    }
   }
 
   /**

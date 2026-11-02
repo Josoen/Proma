@@ -38,6 +38,12 @@ describe('Agent 标题配置', () => {
 })
 
 describe('Agent 标题生成', () => {
+  test('Given manual regeneration When the model fails or returns empty Then returns failure instead of replacing an existing title with a local fallback', async () => {
+    for (const fails of [false, true]) {
+      const complete = async () => { if (fails) throw new Error('429'); return null }
+      expect(await generateSessionTitle(input, {}, { getChannel: () => channel('session'), complete }, undefined, false)).toBeNull()
+    }
+  })
   test('Given no title settings When generating Then follows this session and uses the fixed Prompt', async () => {
     const selected = channel('session')
     const complete = mock<SessionTitleDependencies['complete']>(async () => '“启动修复”')
