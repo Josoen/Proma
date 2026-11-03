@@ -43,7 +43,7 @@ import { PiUtilityAdapter } from './adapters/pi-utility-adapter'
 import { AgentEventBus } from './agent-event-bus'
 import { AgentOrchestrator } from './agent-orchestrator'
 import { getAgentSessionWorkspacePath } from './config-paths'
-import { getAgentWorkspaceBySlug, getProjectFilesPath } from './agent-workspace-manager'
+import { assertAgentWorkspaceActive, getAgentWorkspaceBySlug, getProjectFilesPath } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
 import { getAgentSessionMeta, markAgentSessionDeleting, updateAgentSessionMeta } from './agent-session-manager'
 import { setAgentStopper, setHeadlessAgentRunner } from './agent-headless-runner-registry'
@@ -178,7 +178,13 @@ const agentQueueCoordinator = new AgentQueueCoordinator({
  */
 const startingAgentSessions = new Set<string>()
 
+export function assertAgentSessionProjectActive(sessionId: string): void {
+  const workspaceId = getAgentSessionMeta(sessionId)?.workspaceId
+  if (workspaceId) assertAgentWorkspaceActive(workspaceId)
+}
+
 export function reserveAgentSessionStart(sessionId: string): () => void {
+  assertAgentSessionProjectActive(sessionId)
   if (startingAgentSessions.has(sessionId) || orchestrator.isActive(sessionId)) {
     throw new Error('会话正在启动或运行中，请等待当前请求结束后再发送。')
   }
@@ -187,7 +193,7 @@ export function reserveAgentSessionStart(sessionId: string): () => void {
 }
 
 export function isAgentSessionBusy(sessionId: string): boolean {
-  return startingAgentSessions.has(sessionId)
+  return orchestrator.isPreflighting(sessionId) || startingAgentSessions.has(sessionId)
     || orchestrator.isActive(sessionId)
     || agentQueueCoordinator.hasPending(sessionId)
 }
@@ -271,6 +277,7 @@ export async function runAgent(
   input: AgentRunInput,
   webContents: WebContents,
 ): Promise<void> {
+  assertAgentSessionProjectActive(input.sessionId)
   const route = registerWebContents(input.sessionId, webContents)
   // deferred queue runs carry their queue id as an internal extension.
   const queueMessageId = (input as Partial<AgentDeferredQueueMessageInput>).queueMessageId
@@ -588,6 +595,7 @@ export async function rewindAgentSession(
   sessionId: string,
   assistantMessageUuid: string,
 ): Promise<import('@proma/shared').RewindSessionResult> {
+  assertAgentSessionProjectActive(sessionId)
   return orchestrator.rewindSession(sessionId, assistantMessageUuid)
 }
 
@@ -637,6 +645,7 @@ export async function queueAgentMessage(
   input: AgentQueueMessageInput,
   _webContents: WebContents,
 ): Promise<string> {
+  assertAgentSessionProjectActive(input.sessionId)
   return orchestrator.queueMessage(
     input.sessionId,
     input.userMessage,
@@ -660,6 +669,7 @@ export async function submitOrEnqueueAgentMessage(
   input: AgentSubmitOrEnqueueInput,
   webContents: WebContents,
 ): Promise<AgentSubmitOrEnqueueResult> {
+  assertAgentSessionProjectActive(input.sessionId)
   rebindWebContents(input.sessionId, webContents)
 
   if (input.dispatch === 'now' && orchestrator.isActive(input.sessionId)) {
@@ -692,6 +702,7 @@ export async function submitOrEnqueueAgentMessage(
 /** 兼容旧调用：仅将消息追加到主进程 deferred queue。 */
 export function enqueueAgentQueuedMessage(input: AgentDeferredQueueMessageInput, webContents: WebContents): void {
   rebindWebContents(input.sessionId, webContents)
+  assertAgentSessionProjectActive(input.sessionId)
   agentQueueCoordinator.enqueue(input)
 }
 

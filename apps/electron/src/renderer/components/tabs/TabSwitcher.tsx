@@ -291,7 +291,7 @@ export function TabSwitcher(): ReactElement | null {
         return next
       })
 
-      if (candidate.workspaceId) {
+      if (candidate.workspaceId && store.get(agentWorkspacesAtom).some((workspace) => workspace.id === candidate.workspaceId && !workspace.archived)) {
         setCurrentAgentWorkspaceId(candidate.workspaceId)
         window.electronAPI
           .updateSettings({ agentWorkspaceId: candidate.workspaceId })

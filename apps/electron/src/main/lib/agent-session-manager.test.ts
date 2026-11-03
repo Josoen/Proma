@@ -136,6 +136,37 @@ afterAll(() => {
   rmSync(tempHome, { recursive: true, force: true })
 })
 
+describe('项目归档与双层置顶', () => {
+  test('Given 项目内置顶 When 全局置顶再取消项目置顶 Then 清除全局标记', () => {
+    writeAgentWorkspacesIndex([{ id: 'pin-project', name: '测试项目', slug: 'pin-project', createdAt: 1, updatedAt: 1 }])
+    const session = manager.createAgentSession('置顶', undefined, 'pin-project')
+    expect(() => manager.setAgentSessionGlobalPinned({ sessionId: session.id, globalPinned: true })).toThrow()
+    manager.updateAgentSessionMeta(session.id, { pinned: true })
+    expect(manager.setAgentSessionGlobalPinned({ sessionId: session.id, globalPinned: true }).globalPinned).toBe(true)
+    expect(manager.updateAgentSessionMeta(session.id, { pinned: false }).globalPinned).toBe(false)
+  })
+
+  test('Given 项目含草稿与置顶 When 批量归档 Then 全部可恢复且正文不变', async () => {
+    const workspace = { id: 'archive-project', name: '归档项目', slug: 'archive-project', createdAt: 1, updatedAt: 1 }
+    writeAgentWorkspacesIndex([workspace])
+    const session = manager.createAgentSession('归档', undefined, workspace.id)
+    manager.updateAgentSessionMeta(session.id, { pinned: true, globalPinned: true, isDraft: true })
+    writeAgentSessionJsonl(session.id, [JSON.stringify({ type: 'user', message: { content: '保留正文' } })])
+    expect(manager.archiveAgentSessionsInWorkspace(workspace.id)).toContain(session.id)
+    expect(manager.getAgentSessionMeta(session.id)).toMatchObject({ archived: true, pinned: false, globalPinned: false, isDraft: false })
+    const workspaces = await import('./agent-workspace-manager')
+    workspaces.setAgentWorkspaceArchived(workspace.id, true)
+    expect(() => manager.updateAgentSessionMeta(session.id, { archived: false })).toThrow('先恢复项目')
+    expect(() => manager.createAgentSession('拒绝新建', undefined, workspace.id)).toThrow('先恢复项目')
+    manager.updateAgentSessionMeta(session.id, { title: '后台标题' })
+    expect(manager.getAgentSessionMeta(session.id)?.archived).toBe(true)
+    expect(manager.getAgentSessionSDKMessages(session.id)).toHaveLength(1)
+    workspaces.setAgentWorkspaceArchived(workspace.id, false)
+    expect(manager.getAgentSessionMeta(session.id)?.archived).toBe(true)
+    expect(manager.updateAgentSessionMeta(session.id, { archived: false }).archived).toBe(false)
+  })
+})
+
 describe('Agent 会话 JSONL 读取', () => {
   test('Given 会话 JSONL 混入损坏行 When 读取 SDKMessage Then 跳过坏行并保留其它消息', () => {
     writeAgentSessionJsonl('session-with-bad-line', [
@@ -511,6 +542,7 @@ describe('Agent 会话引用搜索', () => {
 
 describe('Pi entry binding recovery', () => {
   test('Given Pi branch excludes later entries When fork Then keeps only bindings in the fork artifact', async () => {
+    writeAgentWorkspacesIndex([{ id: 'workspace-a', name: 'A', slug: 'workspace-a', createdAt: 1, updatedAt: 1 }])
     const piSessionFile = join(tempHome, '.pi-source-fork.jsonl')
     writeFileSync(piSessionFile, '', 'utf-8')
     writeAgentSessionsIndex([{

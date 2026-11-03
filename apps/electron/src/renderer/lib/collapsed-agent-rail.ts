@@ -98,6 +98,7 @@ export function buildAgentSessionTrees(
   agentIndicatorMap?: ReadonlyMap<string, SessionIndicatorStatus>,
 ): AgentSessionTreeItem[] {
   const sessionIds = new Set(sessions.map((session) => session.id))
+  const byId = new Map(sessions.map((session) => [session.id, session]))
   const childrenByParentId = new Map<string, AgentSessionMeta[]>()
   const roots: AgentSessionMeta[] = []
 
@@ -106,6 +107,8 @@ export function buildAgentSessionTrees(
       isDelegatedChildSession(session)
       && session.parentSessionId
       && sessionIds.has(session.parentSessionId)
+      && !session.globalPinned
+      && !(session.pinned && !byId.get(session.parentSessionId)?.pinned)
     ) {
       const children = childrenByParentId.get(session.parentSessionId) ?? []
       children.push(session)
@@ -130,7 +133,7 @@ export function buildWorkspaceAgentSessionTrees(
   agentIndicatorMap?: ReadonlyMap<string, SessionIndicatorStatus>,
 ): AgentSessionTreeItem[] {
   const workspaceSessions = workspaceId
-    ? sessions.filter((session) => session.workspaceId === workspaceId)
+    ? sessions.filter((session) => session.workspaceId === workspaceId || session.globalPinned)
     : sessions
   return buildAgentSessionTrees(workspaceSessions, agentIndicatorMap)
 }

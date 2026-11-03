@@ -24,6 +24,7 @@ import {
 } from './config-paths'
 import {
   getAgentWorkspace,
+  assertAgentWorkspaceActive,
   getProjectFilesPath,
   listAgentWorkspaces,
 } from './agent-workspace-manager'
@@ -406,6 +407,7 @@ export function createAgentSession(
   sessionWorkbenchLayout?: SessionWorkbenchLayout,
   isDraft?: boolean,
 ): AgentSessionMeta {
+  if (workspaceId) assertAgentWorkspaceActive(workspaceId)
   const index = readIndex()
   const now = Date.now()
 
@@ -487,7 +489,7 @@ export function appendAgentMessage(id: string, message: AgentMessage): void {
     if (idx !== -1) {
       const session = index.sessions[idx]!
       session.updatedAt = Date.now()
-      if (session.archived) session.archived = false
+      if (session.archived && !getAgentWorkspace(session.workspaceId ?? '')?.archived) session.archived = false
       writeIndex(index)
     }
   } catch (error) {
@@ -610,7 +612,7 @@ export function getAgentSessionSDKMessages(id: string): SDKMessage[] {
  */
 export function updateAgentSessionMeta(
   id: string,
-  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'activeWorktree' | 'pinned' | 'starred' | 'archived' | 'isDraft' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'explorationParentSessionId' | 'explorationSourceMessageId' | 'explorationSourceLabel' | 'explorationTitleInitializedAt' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
+  updates: Partial<Pick<AgentSessionMeta, 'title' | 'channelId' | 'modelId' | 'sdkSessionId' | 'piSessionFile' | 'piEntryBindings' | 'codexFastMode' | 'reasoningLevel' | 'openAIThinkingLevel' | 'workspaceId' | 'activeWorktree' | 'pinned' | 'globalPinned' | 'starred' | 'archived' | 'isDraft' | 'attachedDirectories' | 'attachedFiles' | 'forkSourceDir' | 'explorationParentSessionId' | 'explorationSourceMessageId' | 'explorationSourceLabel' | 'explorationTitleInitializedAt' | 'stoppedByUser' | 'permissionMode' | 'completedButUnconfirmed' | 'sourceAutomationId' | 'automationGraduated' | 'parentSessionId' | 'rootSessionId' | 'sourceDelegationId' | 'delegationRole' | 'delegationStatus' | 'delegationDepth' | 'delegationGoal'>>,
 ): AgentSessionMeta {
   const index = readIndex()
   const idx = index.sessions.findIndex((s) => s.id === id)
@@ -620,12 +622,16 @@ export function updateAgentSessionMeta(
   }
 
   const existing = index.sessions[idx]!
+  const workspace = getAgentWorkspace(updates.workspaceId ?? existing.workspaceId ?? '')
+  if (workspace?.archived && (updates.archived === false || updates.pinned === true || updates.globalPinned === true)) {
+    throw new Error('项目已归档，请先恢复项目')
+  }
   const updateKeys = Object.keys(updates)
   // 星标只是侧栏的视觉标记，不应改变会话的新鲜度或归档状态。
   const isStarredOnly = updateKeys.every((key) => key === 'starred')
   // 非手动归档操作时，若会话已归档则自动恢复为活跃（仅更新 stoppedByUser 或 starred 不触发解归档）
   const isStoppedByUserOnly = updateKeys.every((key) => key === 'stoppedByUser')
-  const autoUnarchive = existing.archived && !('archived' in updates) && !isStoppedByUserOnly && !isStarredOnly
+  const autoUnarchive = !workspace?.archived && existing.archived && !('archived' in updates) && !isStoppedByUserOnly && !isStarredOnly
   const updated: AgentSessionMeta = {
     ...existing,
     ...updates,
@@ -633,11 +639,42 @@ export function updateAgentSessionMeta(
     updatedAt: isStarredOnly ? existing.updatedAt : Date.now(),
   }
 
-  index.sessions[idx] = updated
-  writeIndex(index)
+  if (workspace?.archived) updated.archived = true
+  if (updated.archived || !updated.pinned) updated.globalPinned = false
+  if (updated.archived) updated.pinned = false
+  if (updated.globalPinned) {
+    if (!updated.workspaceId || updated.sourceAutomationId) throw new Error('只有项目内置顶的普通项目会话可移至全局')
+    assertAgentWorkspaceActive(updated.workspaceId)
+  }
+  writeIndex({ ...index, sessions: index.sessions.map((item, i) => i === idx ? updated : item) })
 
   console.log(`[Agent 会话] 已更新会话: ${updated.title} (${updated.id})`)
   return updated
+}
+
+export function setAgentSessionGlobalPinned(input: import('@proma/shared').SetAgentSessionGlobalPinnedInput): AgentSessionMeta {
+  const session = getAgentSessionMeta(input.sessionId)
+  if (!session) throw new Error('会话不存在')
+  if (input.globalPinned) {
+    if (!session.pinned || session.archived || session.isDraft || !session.workspaceId || session.sourceAutomationId) {
+      throw new Error('请先在项目内置顶会话')
+    }
+    assertAgentWorkspaceActive(session.workspaceId)
+  }
+  return updateAgentSessionMeta(session.id, { globalPinned: input.globalPinned, archived: session.archived })
+}
+
+/** 一次持久化全部会话，失败不污染索引缓存。 */
+export function archiveAgentSessionsInWorkspace(workspaceId: string): string[] {
+  const index = readIndex()
+  const affected = index.sessions.filter((session) => session.workspaceId === workspaceId)
+  const now = Date.now()
+  const sessions = index.sessions.map((session) => {
+    if (session.workspaceId !== workspaceId || (session.archived && !session.pinned && !session.globalPinned && !session.isDraft)) return session
+    return { ...session, archived: true, pinned: false, globalPinned: false, isDraft: false, updatedAt: now }
+  })
+  if (sessions.some((session, i) => session !== index.sessions[i])) writeIndex({ ...index, sessions })
+  return affected.map((session) => session.id)
 }
 
 /**
@@ -760,7 +797,7 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
 
   const session = index.sessions[idx]!
 
-  const targetWs = getAgentWorkspace(targetWorkspaceId)
+  const targetWs = assertAgentWorkspaceActive(targetWorkspaceId)
   if (!targetWs) {
     throw new Error(`目标项目不存在: ${targetWorkspaceId}`)
   }
@@ -784,6 +821,7 @@ export function moveSessionToWorkspace(sessionId: string, targetWorkspaceId: str
     const updated: AgentSessionMeta = {
       ...current,
       workspaceId: targetWorkspaceId,
+      globalPinned: false,
       // Pi artifact 与 entry bindings 都以原 cwd 为根；跨工作区复用会造成错误 resume/fork/rewind。
       sdkSessionId: undefined,
       piSessionFile: undefined,
@@ -853,6 +891,7 @@ export async function forkAgentSession(input: ForkSessionInput): Promise<AgentSe
   if (sourceMeta.legacyTranscript) {
     throw new Error('历史 Claude transcript 为只读，不能分叉；请新建 Pi 会话继续')
   }
+  if (sourceMeta.workspaceId) assertAgentWorkspaceActive(sourceMeta.workspaceId)
   return forkPiAgentSession(sourceMeta, input)
 }
 
@@ -1234,6 +1273,7 @@ export function autoArchiveAgentSessions(daysThreshold: number): number {
     // 草稿没有侧栏入口；自动归档后无法由 Welcome 恢复，会变成不可达记录。
     if (!session.isDraft && !session.pinned && !session.archived && session.updatedAt < threshold) {
       session.archived = true
+      session.globalPinned = false
       count++
     }
   }

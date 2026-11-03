@@ -5,6 +5,7 @@
  * 确保所有打开会话的入口都能正确同步 appMode 和 currentSessionId。
  */
 
+import { getActiveSessionProject } from '@/lib/sidebar-project-navigation'
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import {
@@ -22,6 +23,7 @@ import { automationFormAtom } from '@/atoms/automation-atoms'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
   currentAgentSessionIdAtom,
+  agentWorkspacesAtom,
   agentSessionsAtom,
   currentAgentWorkspaceIdAtom,
   unviewedCompletedSessionIdsAtom,
@@ -59,10 +61,18 @@ export function useOpenSession(): OpenSessionFn {
   const setPendingSessionNavigation = useSetAtom(settingsPendingSessionNavigationAtom)
 
   return React.useCallback(
-    (type: TabType, sessionId: string, title: string, options?: OpenSessionOptions): void => {
+    async (type: TabType, sessionId: string, title: string, options?: OpenSessionOptions): Promise<void> => {
       if (!options?.bypassSettingsGuard && settingsOpen && channelFormDirty) {
         setPendingSessionNavigation({ type, sessionId, title, onOpened: options?.onOpened })
         return
+      }
+      if ((type === 'agent' || type === 'preview') && !store.get(agentSessionsAtom).some((session) => session.id === sessionId)) {
+        try {
+          const archived = await window.electronAPI.listArchivedAgentSessions()
+          const session = archived.find((item) => item.id === sessionId)
+          if (!session) return
+          store.set(agentSessionsAtom, (previous) => previous.some((item) => item.id === sessionId) ? previous : [...previous, session])
+        } catch (error) { console.error('[会话导航] 读取历史失败:', error); return }
       }
       setSettingsOpen(false)
 
@@ -96,8 +106,8 @@ export function useOpenSession(): OpenSessionFn {
         })
 
         // 同步 workspaceId，确保与 TabBar 切换行为一致
-        const session = agentSessions.find((s) => s.id === sessionId)
-        if (session?.workspaceId) {
+        const session = store.get(agentSessionsAtom).find((s) => s.id === sessionId)
+        if (session?.workspaceId && getActiveSessionProject(session, store.get(agentWorkspacesAtom))) {
           setCurrentAgentWorkspaceId(session.workspaceId)
           window.electronAPI.updateSettings({
             agentWorkspaceId: session.workspaceId,

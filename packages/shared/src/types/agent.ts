@@ -27,6 +27,8 @@ export interface AgentWorkspace {
   projectRootPath?: string
   /** 本地项目根目录的运行时状态；Proma 托管项目不设置此字段。 */
   projectRootStatus?: LocalProjectRootStatus
+  /** 项目已归档，须先恢复才能继续执行。 */
+  archived?: boolean
   /** 创建时间戳 */
   createdAt: number
   /** 更新时间戳 */
@@ -45,6 +47,23 @@ export interface CreateAgentWorkspaceInput {
 export interface CreateAgentProjectResult {
   workspace: AgentWorkspace
   session: AgentSessionMeta
+}
+
+export interface SetAgentSessionGlobalPinnedInput {
+  sessionId: string
+  globalPinned: boolean
+}
+
+export interface SetAgentWorkspaceArchivedInput {
+  workspaceId: string
+  archived: boolean
+}
+
+export interface SetAgentWorkspaceArchivedResult {
+  workspace: AgentWorkspace
+  affectedSessionIds: string[]
+  status: 'success' | 'partial'
+  error?: string
 }
 
 // ===== SDK 新增类型声明（0.2.52 ~ 0.2.63） =====
@@ -768,8 +787,10 @@ export interface AgentSessionMeta {
    * 等私有资料；缺失字段的历史会话保留 `.context/` 路径以兼容工具历史。
    */
   sessionWorkbenchLayout?: SessionWorkbenchLayout
-  /** 是否置顶 */
+  /** 是否在所属项目内置顶 */
   pinned?: boolean
+  /** 已项目内置顶后，单独展示于全局区域。 */
+  globalPinned?: boolean
   /** 是否已星标（仅用于侧栏快速识别，不影响排序或置顶） */
   starred?: boolean
   /** 是否已归档 */
@@ -1828,6 +1849,8 @@ export const AGENT_IPC_CHANNELS = {
   MIGRATE_CHAT_TO_AGENT: 'agent:migrate-chat-to-agent',
   /** 切换会话置顶状态 */
   TOGGLE_PIN: 'agent:toggle-pin',
+  SET_GLOBAL_PIN: 'agent:set-global-pin',
+  SET_WORKSPACE_ARCHIVED: 'agent:set-workspace-archived',
   /** 切换会话星标状态 */
   TOGGLE_STAR: 'agent:toggle-star',
   /** 清除会话完成状态（兼容清除旧版 manualWorking）。channel 值保留旧名以兼容已缓存的 preload */

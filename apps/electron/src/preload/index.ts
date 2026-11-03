@@ -634,6 +634,8 @@ export interface ElectronAPI {
 
   /** 切换 Agent 会话置顶状态 */
   togglePinAgentSession: (id: string) => Promise<AgentSessionMeta>
+  setAgentSessionGlobalPinned: (input: import('@proma/shared').SetAgentSessionGlobalPinnedInput) => Promise<AgentSessionMeta>
+  setAgentWorkspaceArchived: (input: import('@proma/shared').SetAgentWorkspaceArchivedInput) => Promise<import('@proma/shared').SetAgentWorkspaceArchivedResult>
 
   /** 切换 Agent 会话星标状态 */
   toggleStarAgentSession: (id: string) => Promise<AgentSessionMeta>
@@ -2045,6 +2047,9 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.on(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener)
     return () => { ipcRenderer.removeListener(AGENT_IPC_CHANNELS.QUEUED_MESSAGE_STATUS, listener) }
   },
+
+  setAgentSessionGlobalPinned: (input: import('@proma/shared').SetAgentSessionGlobalPinnedInput) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_GLOBAL_PIN, input),
+  setAgentWorkspaceArchived: (input: import('@proma/shared').SetAgentWorkspaceArchivedInput) => ipcRenderer.invoke(AGENT_IPC_CHANNELS.SET_WORKSPACE_ARCHIVED, input),
 
   // Agent 工作区管理
   listAgentWorkspaces: () => {

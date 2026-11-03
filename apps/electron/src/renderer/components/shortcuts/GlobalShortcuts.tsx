@@ -9,6 +9,7 @@
  * 4. 监听菜单 IPC 事件（Cmd+W 关闭标签）
  */
 
+import { getActiveSessionProject } from '@/lib/sidebar-project-navigation'
 import { useEffect, useCallback } from 'react'
 import { useAtomValue, useSetAtom, useAtom, useStore } from 'jotai'
 import { appModeAtom } from '@/atoms/app-mode'
@@ -527,7 +528,7 @@ export function GlobalShortcuts(): null {
         store.set(activeViewAtom, 'conversations')
         store.set(currentAgentSessionIdAtom, session.id)
 
-        if (session.workspaceId) {
+        if (session.workspaceId && getActiveSessionProject(session, store.get(agentWorkspacesAtom))) {
           store.set(currentAgentWorkspaceIdAtom, session.workspaceId)
           window.electronAPI.updateSettings({
             agentWorkspaceId: session.workspaceId,

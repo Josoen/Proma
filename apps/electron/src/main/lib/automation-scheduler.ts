@@ -15,6 +15,7 @@
  */
 
 import { BrowserWindow } from 'electron'
+import { getAgentWorkspace } from './agent-workspace-manager'
 import {
   AUTOMATION_MAX_CONSECUTIVE_FAILURES,
   AUTOMATION_IPC_CHANNELS,
@@ -24,6 +25,8 @@ import {
 } from '@proma/shared'
 import {
   listAutomations,
+  deferArchivedProjectAutomations,
+  hasMissedArchivedOnce,
   getAutomation,
   appendRun,
   updateAutomation,
@@ -114,6 +117,12 @@ export function broadcastChanged(): void {
  * @param manual 是否手动「立即运行」（手动运行也走同一路径，但不影响调度计时由 appendRun 统一推进）
  */
 export async function runAutomation(automation: Automation, manual = false): Promise<void> {
+  if (getAgentWorkspace(automation.workspaceId ?? '')?.archived) {
+    if (manual) throw new Error('项目已归档，请先恢复项目')
+    deferArchivedProjectAutomations(automation.workspaceId!)
+    return
+  }
+  if (!manual && hasMissedArchivedOnce(automation)) return
   if (runningAutomations.has(automation.id)) {
     console.log(`[定时任务] ${automation.name} 上一轮尚未结束，跳过本轮`)
     appendRun(automation.id, {
@@ -142,7 +151,7 @@ export async function runAutomation(automation: Automation, manual = false): Pro
     if (lastSessionMeta?.automationGraduated) {
       console.log(`[定时任务] ${automation.name} 上次会话已被用户接管，本次自动开新会话`)
     }
-    if (automation.lastSessionId && lastSessionMeta && !lastSessionMeta.automationGraduated) {
+    if (automation.lastSessionId && lastSessionMeta && !lastSessionMeta.archived && !lastSessionMeta.automationGraduated) {
       if (lastSessionMeta.workspaceId !== automation.workspaceId) {
         console.warn(`[定时任务] ${automation.name} 上次会话项目已变化，本次自动开新会话`)
       } else if (sessionMode === 'reuse') {

@@ -13,6 +13,7 @@ import {
   agentModelIdAtom,
   agentSessionsAtom,
   agentWorkspacesAtom,
+  activeAgentWorkspacesAtom,
   currentAgentWorkspaceIdAtom,
 } from '@/atoms/agent-atoms'
 import { activeViewAtom } from '@/atoms/active-view'
@@ -31,7 +32,8 @@ interface UseProjectActionsResult {
 }
 
 export function useProjectActions(): UseProjectActionsResult {
-  const [workspaces, setWorkspaces] = useAtom(agentWorkspacesAtom)
+  const [, setWorkspaces] = useAtom(agentWorkspacesAtom)
+  const workspaces = useAtomValue(activeAgentWorkspacesAtom)
   const [currentWorkspaceId, setCurrentWorkspaceId] = useAtom(currentAgentWorkspaceIdAtom)
   const setAgentSessions = useSetAtom(agentSessionsAtom)
   const agentChannelId = useAtomValue(agentChannelIdAtom)
@@ -42,12 +44,12 @@ export function useProjectActions(): UseProjectActionsResult {
 
   const selectProject = React.useCallback(
     (workspaceId: string, opts?: { resetView?: boolean }): void => {
-      if (workspaceId === currentWorkspaceId) return
+      if (workspaceId === currentWorkspaceId || !workspaces.some((workspace) => workspace.id === workspaceId)) return
       setCurrentWorkspaceId(workspaceId)
       if (opts?.resetView !== false) setActiveView('conversations')
       window.electronAPI.updateSettings({ agentWorkspaceId: workspaceId }).catch(console.error)
     },
-    [currentWorkspaceId, setCurrentWorkspaceId, setActiveView],
+    [currentWorkspaceId, setCurrentWorkspaceId, setActiveView, workspaces],
   )
 
   const createProject = React.useCallback(

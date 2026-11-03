@@ -511,6 +511,8 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
   const sessionMetaChannelId = sessionMeta?.channelId
   const sessionMetaModelId = sessionMeta?.modelId
   const hasSessionMeta = Boolean(sessionMeta)
+  const archiveProjects = useAtomValue(agentWorkspacesAtom)
+  const isArchivedHistory = !!sessionMeta?.archived || archiveProjects.some((project) => project.id === sessionMeta?.workspaceId && project.archived)
   const isLegacyTranscript = sessionMeta?.legacyTranscript?.continuationRequired === true
   const agentChannelId = sessionMetaChannelId ?? sessionChannelMap.get(sessionId) ?? defaultChannelId
   const agentModelId = sessionMetaModelId ?? sessionModelMap.get(sessionId) ?? defaultModelId
@@ -840,7 +842,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     () => globalChannels.some((channel) => channel.enabled && channel.models.some((model) => model.enabled)),
     [globalChannels],
   )
-  const isComposerDisabled = isLegacyTranscript || !agentChannelId || !hasAvailableModel
+  const isComposerDisabled = isArchivedHistory || isLegacyTranscript || !agentChannelId || !hasAvailableModel
   React.useEffect(() => {
     if (!agentChannelId || agentModelId) return
 
@@ -2029,6 +2031,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       toast.info('正在停止上一轮 Agent', { description: '请等待停止完成后再发送消息。' })
       return
     }
+    if (isArchivedHistory) { toast.error('请先恢复项目和会话'); return }
     if (isLegacyTranscript) {
       toast.info('这是只读历史会话，请新建 Pi 会话继续')
       return
@@ -2282,7 +2285,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         return map
       })
     })
-  }, [createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, setDraftSessionIds, setAgentSessions, permissionMode, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
+  }, [createBaseAdditionalDirectories, preparePendingFilesForSend, restoreQueuedAttachmentsToPending, sessionId, agentChannelId, agentModelId, agentChannelProvider, currentWorkspaceId, streaming, backgroundWaiting, suggestion, hasAvailableModel, store, consumeQuotedSelection, setStreamingStates, setAgentStreamErrors, setPromptSuggestions, setInputContent, setLiveMessagesMap, setDraftSessionIds, setAgentSessions, permissionMode, isArchivedHistory, messagesLoaded, setQueuedMessages, setQuotedSelectionMap, sendPlainTextAgentMessage, isLegacyTranscript, isStopping])
 
   /** 停止生成。异常流未发出终态时，允许再次下发幂等的 abort 请求。 */
   const handleStop = React.useCallback((): void => {
@@ -2309,6 +2312,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
 
   /** 手动发送 /compact 命令 */
   const handleCompact = React.useCallback((): void => {
+    if (isArchivedHistory) { toast.error('请先恢复项目和会话'); return }
     if (!agentChannelId || streaming) return
 
     const streamStartedAt = Date.now()
@@ -2378,7 +2382,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
         return map
       })
     })
-  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates, store, permissionMode])
+  }, [sessionId, agentChannelId, agentModelId, currentWorkspaceId, streaming, setStreamingStates, store, permissionMode, isArchivedHistory])
 
   /** 复制错误信息到剪贴板 */
   const handleCopyError = React.useCallback(async (): Promise<void> => {
@@ -2997,8 +3001,8 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
           onRetryInNewSession={handleRetryInNewSession}
           onRelinkProjectRoot={handleRelinkProjectRoot}
           onRestoreProjectRoot={handleOpenRestoreProjectRootDialog}
-          onFork={embedded || isLegacyTranscript ? undefined : handleFork}
-          onRewind={isLegacyTranscript ? undefined : handleRewindRequest}
+          onFork={embedded || isArchivedHistory || isLegacyTranscript ? undefined : handleFork}
+          onRewind={isArchivedHistory || isLegacyTranscript ? undefined : handleRewindRequest}
           onCreateTodo={handleOpenReplyTodoDialog}
           onCompact={handleCompact}
           onAddHistoryQuote={handleAddHistoryQuote}
@@ -3031,6 +3035,9 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
             onDrop={handleDrop}
           >
             {(isPlanMode || isPermissionPlanMode) && !isDragOver && <PlanModeDashedBorder />}
+            {isArchivedHistory && (
+              <div className="px-4 py-2 text-sm text-amber-700 dark:text-amber-300">已归档的只读历史。请先在“已归档”中恢复项目，再恢复会话后继续。</div>
+            )}
             {isLegacyTranscript && (
               <div className="flex items-center justify-between gap-3 px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
                 <span>这是已退役 Claude runtime 的只读历史会话；原对话可查看，但不能继续、分叉或回退。</span>

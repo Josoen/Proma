@@ -1,6 +1,15 @@
 import type { AgentSessionMeta, AgentWorkspace } from '@proma/shared'
 import type { SessionIndicatorStatus } from '@/atoms/agent-atoms'
 
+/** 先决定唯一展示位置，再构建母子树，避免全局母会话的子行泄漏回项目。 */
+export function partitionSidebarSessions(sessions: readonly AgentSessionMeta[], archivedProjectIds: ReadonlySet<string>) {
+  const visible = sessions.filter((session) => !session.archived && !session.isDraft && !archivedProjectIds.has(session.workspaceId ?? ''))
+  const globalIds = new Set(visible.filter((session) => session.globalPinned && session.pinned).map((session) => session.id))
+  const global = visible.filter((session) => globalIds.has(session.id) || (session.sourceDelegationId && globalIds.has(session.parentSessionId ?? '')))
+  const displayedIds = new Set(global.map((session) => session.id))
+  return { global, project: visible.filter((session) => !displayedIds.has(session.id)) }
+}
+
 interface AgentSessionTreeLike {
   session: Pick<AgentSessionMeta, 'id'>
   childSessions: readonly Pick<AgentSessionMeta, 'id'>[]

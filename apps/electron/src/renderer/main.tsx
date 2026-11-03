@@ -255,11 +255,13 @@ function AgentSettingsInitializer(): null {
       window.electronAPI.listAgentWorkspaces().then((workspaces) => {
         setAgentWorkspaces(workspaces)
         if (settings.agentWorkspaceId) {
-          // 验证工作区仍然存在
-          const exists = workspaces.some((w) => w.id === settings.agentWorkspaceId)
-          setCurrentWorkspaceId(exists ? settings.agentWorkspaceId! : workspaces[0]?.id ?? null)
+          // 验证工作区存在且可作为新建目标。
+          const exists = workspaces.some((w) => w.id === settings.agentWorkspaceId && !w.archived)
+          const selectedId = exists ? settings.agentWorkspaceId! : (workspaces.find((w) => w.slug === 'default' && !w.archived) ?? workspaces.find((w) => !w.archived))?.id ?? null
+          setCurrentWorkspaceId(selectedId)
+          if (!exists && selectedId) void window.electronAPI.updateSettings({ agentWorkspaceId: selectedId }).catch(console.error)
         } else if (workspaces.length > 0) {
-          setCurrentWorkspaceId(workspaces[0]!.id)
+          setCurrentWorkspaceId((workspaces.find((w) => w.slug === 'default' && !w.archived) ?? workspaces.find((w) => !w.archived))?.id ?? null)
         }
         setAgentSettingsReady(true)
       }).catch((err) => {
@@ -902,7 +904,9 @@ function TabStatePersistenceInitializer(): null {
       const archivedAgentSessions = hasArchivedAgentTab
         ? await window.electronAPI.listArchivedAgentSessions()
         : []
-      const agentSessions = [...activeAgentSessions, ...archivedAgentSessions]
+      const projects = await window.electronAPI.listAgentWorkspaces()
+      const archivedProjectIds = new Set(projects.filter((project) => project.archived).map((project) => project.id))
+      const agentSessions = [...activeAgentSessions, ...archivedAgentSessions].filter((session) => !archivedProjectIds.has(session.workspaceId ?? ''))
 
       // 构建有效 sessionId 集合
       const validSessionIds = new Set([

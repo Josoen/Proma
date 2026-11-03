@@ -7,6 +7,7 @@
  * 使用 useStore() 直接操作 atoms，避免 React 订阅。
  */
 
+import { getActiveSessionProject } from '@/lib/sidebar-project-navigation'
 import { useEffect } from 'react'
 import { unstable_batchedUpdates } from 'react-dom'
 import { useStore } from 'jotai'
@@ -677,7 +678,7 @@ export function useGlobalAgentListeners(): void {
       store.set(currentAgentSessionIdAtom, sessionId)
       const sessions = store.get(agentSessionsAtom)
       const session = sessions.find((s) => s.id === sessionId)
-      if (session?.workspaceId) {
+      if (session?.workspaceId && getActiveSessionProject(session, store.get(agentWorkspacesAtom))) {
         store.set(currentAgentWorkspaceIdAtom, session.workspaceId)
       }
     }

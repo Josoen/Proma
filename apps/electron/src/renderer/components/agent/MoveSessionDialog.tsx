@@ -45,7 +45,7 @@ export function MoveSessionDialog({
 
   // 过滤掉会话已属的工作区
   const availableWorkspaces = React.useMemo(
-    () => workspaces.filter((ws) => ws.id !== sourceWorkspaceId),
+    () => workspaces.filter((ws) => !ws.archived && ws.id !== sourceWorkspaceId),
     [workspaces, sourceWorkspaceId]
   )
 

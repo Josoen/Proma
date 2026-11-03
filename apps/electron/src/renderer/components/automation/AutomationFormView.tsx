@@ -1077,10 +1077,10 @@ export function AutomationFormView({ embedded = false }: { embedded?: boolean } 
               >
                 <SelectTrigger><SelectValue placeholder="选择项目" /></SelectTrigger>
                 <SelectContent>
-                  {workspaces.map((ws) => (
-                    <SelectItem key={ws.id} value={ws.id}>
+                  {workspaces.filter((ws) => !ws.archived || ws.id === form.workspaceId).map((ws) => (
+                    <SelectItem key={ws.id} value={ws.id} disabled={!!ws.archived}>
                       <span className="flex items-center gap-1.5">
-                        <span>{ws.name}</span>
+                        <span>{ws.name}{ws.archived ? '（已归档）' : ''}</span>
                         <LocalProjectBadge
                           projectRootPath={ws.projectRootPath}
                           projectRootStatus={ws.projectRootStatus}

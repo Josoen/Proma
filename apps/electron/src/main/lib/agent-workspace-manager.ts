@@ -200,7 +200,7 @@ export async function listAgentWorkspacesWithProjectRootStatus(): Promise<AgentW
 /** 按指定 ID 顺序重排工作区，未列出的追加到末尾 */
 export function reorderAgentWorkspaces(orderedIds: string[]): AgentWorkspace[] {
   const index = readIndex()
-  const byId = new Map(index.workspaces.map((w) => [w.id, w]))
+  const byId = new Map(index.workspaces.filter((w) => !w.archived).map((w) => [w.id, w]))
   const reordered: AgentWorkspace[] = []
   for (const id of orderedIds) {
     const ws = byId.get(id)
@@ -210,14 +210,34 @@ export function reorderAgentWorkspaces(orderedIds: string[]): AgentWorkspace[] {
     }
   }
   for (const ws of byId.values()) reordered.push(ws)
-  index.workspaces = reordered
+  let position = 0
+  index.workspaces = index.workspaces.map((workspace) => workspace.archived ? workspace : reordered[position++]!)
   writeIndex(index)
-  return reordered
+  return index.workspaces
 }
 
 export function getAgentWorkspace(id: string): AgentWorkspace | undefined {
   const index = readIndex()
   return index.workspaces.find((w) => w.id === id)
+}
+
+/** 归档项目仍可读取历史，但不可被执行入口隐式激活。 */
+export function assertAgentWorkspaceActive(id: string): AgentWorkspace {
+  const workspace = getAgentWorkspace(id)
+  if (!workspace) throw new Error('项目不存在')
+  if (workspace.archived) throw new Error('项目已归档，请先恢复项目')
+  return workspace
+}
+
+export function setAgentWorkspaceArchived(id: string, archived: boolean): AgentWorkspace {
+  const index = readIndex()
+  const workspace = index.workspaces.find((item) => item.id === id)
+  if (!workspace) throw new Error('项目不存在')
+  if (archived && workspace.slug === 'default') throw new Error('默认项目不能归档')
+  if (!!workspace.archived === archived) return workspace
+  const updated = { ...workspace, archived, updatedAt: Date.now() }
+  writeIndex({ ...index, workspaces: index.workspaces.map((item) => item.id === id ? updated : item) })
+  return updated
 }
 
 /** 按 slug 查找项目，供项目文件根解析使用。 */

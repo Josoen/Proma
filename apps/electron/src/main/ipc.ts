@@ -4,6 +4,8 @@
  * 负责注册主进程和渲染进程之间的通信处理器
  */
 
+import { setAgentProjectArchived } from './lib/agent-project-archive'
+import { setAgentSessionGlobalPinned } from './lib/agent-session-manager'
 import { ipcMain, nativeTheme, shell, dialog, BrowserWindow, app, clipboard, nativeImage } from 'electron'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs'
@@ -2782,6 +2784,12 @@ export function registerIpcHandlers(): void {
       migrateChatToAgentSession(conversationId, agentSessionId)
     }
   )
+
+  ipcMain.handle(AGENT_IPC_CHANNELS.SET_GLOBAL_PIN, (_, input: import('@proma/shared').SetAgentSessionGlobalPinnedInput) => {
+    if (!input || typeof input.sessionId !== 'string' || !input.sessionId.trim() || typeof input.globalPinned !== 'boolean') throw new Error('全局置顶参数无效')
+    return setAgentSessionGlobalPinned(input)
+  })
+  ipcMain.handle(AGENT_IPC_CHANNELS.SET_WORKSPACE_ARCHIVED, (_, input: import('@proma/shared').SetAgentWorkspaceArchivedInput) => setAgentProjectArchived(input))
 
   // 切换 Agent 会话置顶状态
   ipcMain.handle(

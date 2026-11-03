@@ -9,11 +9,13 @@
  * 与该条分支对齐）。
  */
 
+import { getActiveSessionProject } from '@/lib/sidebar-project-navigation'
 import { useCallback } from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { appModeAtom } from '@/atoms/app-mode'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
+  agentWorkspacesAtom,
   agentSessionsAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
@@ -24,6 +26,7 @@ import type { TabItem } from '@/atoms/tab-atoms'
 export type SyncActiveTabSideEffects = (newActiveTab: TabItem | null) => void
 
 export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
+  const store = useStore()
   const setAppMode = useSetAtom(appModeAtom)
   const setCurrentConversationId = useSetAtom(currentConversationIdAtom)
   const setCurrentAgentSessionId = useSetAtom(currentAgentSessionIdAtom)
@@ -63,7 +66,7 @@ export function useSyncActiveTabSideEffects(): SyncActiveTabSideEffects {
 
       // 同步 workspace
       const session = agentSessions.find((s) => s.id === newActiveTab.sessionId)
-      if (session?.workspaceId) {
+      if (session?.workspaceId && getActiveSessionProject(session, store.get(agentWorkspacesAtom))) {
         setCurrentAgentWorkspaceId(session.workspaceId)
         window.electronAPI.updateSettings({
           agentWorkspaceId: session.workspaceId,

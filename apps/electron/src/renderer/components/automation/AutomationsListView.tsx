@@ -26,6 +26,7 @@ import {
   createEmptyDraft,
 } from '@/atoms/automation-atoms'
 import type { Automation } from '@proma/shared'
+import { agentWorkspacesAtom } from '@/atoms/agent-atoms'
 
 /** 把调度配置格式化为可读文案 */
 function formatSchedule(a: Automation): string {
@@ -158,12 +159,14 @@ interface SectionProps {
 
 function Section({ title, automations, onEdit, onRefresh, onDelete }: SectionProps): React.ReactElement {
   /** 列表上的任务是否具备运行 / 启用所需的最小完整度 */
-  const isRunnable = (a: Automation): boolean => !!a.channelId && !!a.workspaceId
+  const projects = useAtomValue(agentWorkspacesAtom)
+  const isArchivedProject = (a: Automation): boolean => projects.some((project) => project.id === a.workspaceId && project.archived)
+  const isRunnable = (a: Automation): boolean => !!a.channelId && !!a.workspaceId && !isArchivedProject(a)
 
   const handleRunNow = async (e: React.MouseEvent, a: Automation): Promise<void> => {
     e.stopPropagation()
     if (!isRunnable(a)) {
-      toast.error('请先为该任务配置模型与项目')
+      toast.error(isArchivedProject(a) ? '项目已归档，请先恢复项目' : '请先为该任务配置模型与项目')
       onEdit(a)
       return
     }
@@ -233,7 +236,7 @@ function Section({ title, automations, onEdit, onRefresh, onDelete }: SectionPro
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-muted-foreground">
                 <span className="inline-flex items-center gap-1"><Clock className="size-3" />{formatSchedule(a)}</span>
-                <span className="tabular-nums">{formatNextRun(a)}</span>
+                <span className="tabular-nums">{isArchivedProject(a) ? '项目已归档，暂不执行' : a.scheduleType === 'once' && a.runHistory.some((run) => run.skipReason === `项目已归档，跳过一次性计划:${a.scheduledAt}`) ? '已错过一次性计划，请重新设定时间' : formatNextRun(a)}</span>
               </div>
             </div>
             {/* 右侧槽位固定宽度，只在悬浮时显示行操作，避免改变列表布局。 */}

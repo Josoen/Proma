@@ -1085,7 +1085,7 @@ class FeishuBridge {
     // 选择工作区：显式指定 > Bot 默认 > 应用设置 > 第一个工作区
     let workspaceId = overrideWorkspaceId ?? this.botConfig.defaultWorkspaceId ?? appSettings.agentWorkspaceId
     if (!workspaceId) {
-      const byTime = listAgentWorkspacesByUpdatedAt()
+      const byTime = listAgentWorkspacesByUpdatedAt().filter((workspace) => !workspace.archived)
       const def = byTime.find((w) => w.slug === 'default')
       workspaceId = def?.id ?? byTime[0]?.id
     }
@@ -1225,7 +1225,7 @@ class FeishuBridge {
   private async handleListCommand(msgCtx: FeishuMessageContext): Promise<void> {
     const { chatId } = msgCtx
     const sessions = listAgentSessions()
-    const workspaces = listAgentWorkspacesByUpdatedAt()
+    const workspaces = listAgentWorkspacesByUpdatedAt().filter((workspace) => !workspace.archived)
     const binding = this.chatBindings.get(chatId)
     const currentWorkspaceId = binding?.workspaceId
 
@@ -1328,7 +1328,7 @@ class FeishuBridge {
 
   private async handleWorkspaceCommand(msgCtx: FeishuMessageContext, arg?: string): Promise<void> {
     const { chatId } = msgCtx
-    const workspaces = listAgentWorkspacesByUpdatedAt()
+    const workspaces = listAgentWorkspacesByUpdatedAt().filter((workspace) => !workspace.archived)
     const binding = this.chatBindings.get(chatId)
     const currentWorkspaceId = binding?.workspaceId
 

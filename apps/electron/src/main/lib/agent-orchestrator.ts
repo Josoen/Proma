@@ -49,7 +49,7 @@ import { decryptApiKey, getChannelById, persistCodexOAuthCredentials, persistGit
 import pkg from '../../../package.json' with { type: 'json' }
 import { getEffectiveProxyUrl } from './proxy-settings-service'
 import { appendSDKMessages, updateAgentSessionMeta, getAgentSessionMeta, getAgentSessionMessages, getAgentSessionSDKMessages, removeSDKErrorMessage, updateSDKUserMessageSkillActivations, rewindPiAgentSession, resolveAgentCwd, getActiveWorktreePath, getAgentCwdMode, getSessionWorkbenchLayout, resolveSessionWorkbenchContextDir, isAgentSessionDeleting } from './agent-session-manager'
-import { getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
+import { assertAgentWorkspaceActive, getAgentWorkspace, getProjectFilesPath, getWorkspaceMcpConfig, getWorkspaceAttachedDirectories, getWorkspaceAttachedFiles, getWorkspaceAgentsMdPath, readWorkspaceAgentsMd, getWorkspaceMemoryGuidance, isWorkspaceProjectKnowledgeMaintenanceApproved } from './agent-workspace-manager'
 import { getLocalProjectRootStatus } from './project-root-health'
 import { getMcpApiKeyEnvironment, getMcpOAuthHeaders } from './mcp-oauth-service'
 import { getAgentWorkspacePath, getAgentSessionWorkspacePath, getSdkConfigDir, getWorkspaceSkillsDir } from './config-paths'
@@ -646,7 +646,39 @@ export class AgentOrchestrator {
    * 核心编排方法，从 agent-service.ts 的 runAgent 提取。
    * 通过 EventBus 分发 AgentEvent，通过 callbacks 发送控制信号。
    */
+  private readonly preflightSessionIds = new Set<string>()
+
+  isPreflighting(sessionId: string): boolean {
+    return this.preflightSessionIds.has(sessionId)
+  }
+
   async sendMessage(
+    input: AgentRunInput,
+    callbacks: SessionCallbacks,
+    extensions: { piCustomTools?: ToolDefinition[] } = {},
+  ): Promise<void> {
+    const workspaceId = getAgentSessionMeta(input.sessionId)?.workspaceId ?? input.workspaceId
+    try {
+      if (workspaceId) assertAgentWorkspaceActive(workspaceId)
+    } catch (error) {
+      callbacks.onError(error instanceof Error ? error.message : '项目不可用')
+      callbacks.onComplete([], { startedAt: input.startedAt ?? Date.now(), runGeneration: input.runGeneration })
+      return
+    }
+    if (this.preflightSessionIds.has(input.sessionId)) {
+      callbacks.onError('会话正在启动或运行中')
+      callbacks.onComplete([], { startedAt: input.startedAt ?? Date.now(), runGeneration: input.runGeneration })
+      return
+    }
+    this.preflightSessionIds.add(input.sessionId)
+    try {
+      await this.sendMessageInternal(input, callbacks, extensions)
+    } finally {
+      this.preflightSessionIds.delete(input.sessionId)
+    }
+  }
+
+  private async sendMessageInternal(
     input: AgentRunInput,
     callbacks: SessionCallbacks,
     extensions: { piCustomTools?: ToolDefinition[] } = {},

@@ -239,7 +239,7 @@ export class BridgeCommandHandler {
   private resolveValidWorkspaceId(fallbackWorkspaceId?: string): string {
     const requestedWorkspaceId = this.config.getDefaultWorkspaceId?.() ?? fallbackWorkspaceId ?? ''
     if (requestedWorkspaceId && getAgentWorkspace(requestedWorkspaceId)) return requestedWorkspaceId
-    return listAgentWorkspacesByUpdatedAt()[0]?.id ?? ''
+    return listAgentWorkspacesByUpdatedAt().find((workspace) => !workspace.archived)?.id ?? ''
   }
 
   private isBindingValid(binding: BridgeChatBinding): boolean {
@@ -386,7 +386,7 @@ export class BridgeCommandHandler {
 
   private async handleListCommand(chatId: string, contextData?: unknown): Promise<void> {
     const sessions = listAgentSessions()
-    const workspaces = listAgentWorkspacesByUpdatedAt()
+    const workspaces = listAgentWorkspacesByUpdatedAt().filter((workspace) => !workspace.archived)
     const binding = this.chatBindings.get(chatId)
 
     if (sessions.length === 0) {
@@ -481,7 +481,7 @@ export class BridgeCommandHandler {
   }
 
   private async handleWorkspaceCommand(chatId: string, arg?: string, contextData?: unknown): Promise<void> {
-    const workspaces = listAgentWorkspacesByUpdatedAt()
+    const workspaces = listAgentWorkspacesByUpdatedAt().filter((workspace) => !workspace.archived)
     const binding = this.chatBindings.get(chatId)
     const currentWorkspaceId = binding?.workspaceId
 

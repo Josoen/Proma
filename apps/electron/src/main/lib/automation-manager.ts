@@ -617,6 +617,28 @@ export function appendRun(id: string, run: AutomationRun): Automation | undefine
   return target
 }
 
+function archivedOnceReason(automation: Automation): string {
+  return `项目已归档，跳过一次性计划:${automation.scheduledAt}`
+}
+
+export function hasMissedArchivedOnce(automation: Automation): boolean {
+  return automation.scheduleType === 'once' && automation.runHistory.some((run) => run.status === 'skipped' && run.skipReason === archivedOnceReason(automation))
+}
+
+/** 只推进到期任务，不改启用偏好、执行次数或历史会话归档状态。 */
+export function deferArchivedProjectAutomations(workspaceId: string, now = Date.now()): void {
+  for (const automation of listAutomations()) {
+    if (automation.workspaceId !== workspaceId || !automation.active || automation.nextRunAt > now) continue
+    if (automation.scheduleType === 'once') {
+      if (!hasMissedArchivedOnce(automation)) appendRun(automation.id, {
+        runAt: now, sessionId: '', status: 'skipped', skipReason: archivedOnceReason(automation),
+      })
+    } else {
+      setNextRunAt(automation.id, computeNextRunAt(automation, now))
+    }
+  }
+}
+
 /** 设置 nextRunAt（调度器恢复过期任务时用，避免重启雪崩触发） */
 export function setNextRunAt(id: string, nextRunAt: number): void {
   const index = readIndex()

@@ -534,8 +534,9 @@ function cleanupArchivedSessions(beforeDays: number): CleanupResult {
   let freedBytes = 0, deletedCount = 0
   const errors: string[] = []
 
+  const archivedProjects = new Set(listAgentWorkspaces().filter((workspace) => workspace.archived).map((workspace) => workspace.id))
   for (const session of sessions) {
-    if (!session.archived || session.updatedAt > cutoff) continue
+    if (archivedProjects.has(session.workspaceId ?? '') || !session.archived || session.updatedAt > cutoff) continue
 
     // 删除 JSONL 消息文件
     const msgPath = join(getAgentSessionsDir(), `${session.id}.jsonl`)

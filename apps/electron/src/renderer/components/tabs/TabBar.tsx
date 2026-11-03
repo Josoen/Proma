@@ -8,6 +8,7 @@
  * - Chrome 风格等分宽度（溢出时可横向滚动）
  */
 
+import { getActiveSessionProject } from '@/lib/sidebar-project-navigation'
 import * as React from 'react'
 import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai'
 import { HelpCircle, Keyboard, Globe, PanelRight } from 'lucide-react'
@@ -134,7 +135,7 @@ export function TabBar(): React.ReactElement {
       })
 
       const session = agentSessions.find((s) => s.id === tab.sessionId)
-      if (session?.workspaceId) {
+      if (session?.workspaceId && getActiveSessionProject(session, store.get(agentWorkspacesAtom))) {
         setCurrentAgentWorkspaceId(session.workspaceId)
         window.electronAPI.updateSettings({
           agentWorkspaceId: session.workspaceId,

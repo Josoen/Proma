@@ -4,11 +4,13 @@
  * 仅切换 activeTabId，不重建、关闭或改变预览 Tab / 分屏状态。
  */
 
+import { getActiveSessionProject } from '@/lib/sidebar-project-navigation'
 import * as React from 'react'
 import { useAtomValue, useSetAtom, useStore } from 'jotai'
 import { appModeAtom } from '@/atoms/app-mode'
 import { currentConversationIdAtom } from '@/atoms/chat-atoms'
 import {
+  agentWorkspacesAtom,
   agentSessionsAtom,
   currentAgentSessionIdAtom,
   currentAgentWorkspaceIdAtom,
@@ -45,7 +47,7 @@ export function useFocusAgentSessionInput(): FocusAgentSessionInput {
     })
 
     const session = agentSessions.find((item) => item.id === sessionId)
-    if (session?.workspaceId) {
+    if (session?.workspaceId && getActiveSessionProject(session, store.get(agentWorkspacesAtom))) {
       setCurrentAgentWorkspaceId(session.workspaceId)
       window.electronAPI.updateSettings({ agentWorkspaceId: session.workspaceId }).catch(console.error)
     }

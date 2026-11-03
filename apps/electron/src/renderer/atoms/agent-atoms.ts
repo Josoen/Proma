@@ -267,6 +267,8 @@ export interface AgentPendingPrompt {
 
 export const agentSessionsAtom = atom<AgentSessionMeta[]>([])
 export const agentWorkspacesAtom = atom<AgentWorkspace[]>([])
+export const activeAgentWorkspacesAtom = atom((get) => get(agentWorkspacesAtom).filter((workspace) => !workspace.archived))
+export const archivedAgentWorkspacesAtom = atom((get) => get(agentWorkspacesAtom).filter((workspace) => workspace.archived))
 export const currentAgentWorkspaceIdAtom = atom<string | null>(null)
 /** 侧栏「自动任务」合成项目组在项目列表中的位置索引（默认 0 = 最靠前；从 settings.json 加载） */
 export const automationGroupOrderAtom = atom<number>(0)
