@@ -16,7 +16,7 @@ import AdmZip from 'adm-zip'
 import { DOMParser } from '@xmldom/xmldom'
 import type { FilePreviewReadResult, OfficePreviewResult } from '@proma/shared'
 import { getBundledOfficeCliPath } from './officecli-manager'
-import { expandHomeDirectory } from './agent-file-path'
+import { expandHomeDirectory, normalizeWindowsShellPath } from './agent-file-path'
 
 const require = createRequire(__filename)
 const PDFJS_PACKAGE = 'pdfjs-dist'
@@ -92,8 +92,7 @@ export function cleanPreviewTmpDir(): number {
  * 「猜中一个同名文件」比明确提示找不到更危险；最终授权边界由 IPC 层 realpath 校验。
  */
 export function isAbsolutePreviewPath(filePath: string): boolean {
-  const expandedPath = expandHomeDirectory(filePath)
-  return expandedPath.startsWith('/') || expandedPath.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(expandedPath)
+  return isAbsolutePath(normalizeWindowsShellPath(expandHomeDirectory(filePath)))
 }
 
 function isWithinBasePath(candidate: string, basePath: string): boolean {
@@ -111,8 +110,10 @@ function addCandidateWithinBase(candidates: string[], basePath: string, candidat
 }
 
 function getRelativePathAfterBasePrefix(filePath: string, basePath: string): string[] | null {
-  const inputParts = filePath.replace(/\\/g, '/').split('/').filter((part) => part !== '' && part !== '.')
-  const baseParts = resolve(basePath).replace(/\\/g, '/').split('/').filter(Boolean)
+  const inputPath = process.platform === 'win32' ? filePath.replace(/\\/g, '/') : filePath
+  const resolvedBase = resolve(basePath)
+  const inputParts = inputPath.split('/').filter((part) => part !== '' && part !== '.')
+  const baseParts = (process.platform === 'win32' ? resolvedBase.replace(/\\/g, '/') : resolvedBase).split('/').filter(Boolean)
   if (inputParts.length === 0 || baseParts.length === 0) return null
 
   // 输入可能省略了绝对路径前缀，但完整保留了候选根的末段，例如
@@ -144,10 +145,11 @@ function candidatePathsForRelativeFile(filePath: string, basePaths: readonly str
 
 export function resolveTargetPath(filePath: string, basePaths?: string[]): string {
   if (filePath.includes('\0')) return ''
-  if (isAbsolutePreviewPath(filePath)) return resolve(expandHomeDirectory(filePath))
+  const normalizedPath = normalizeWindowsShellPath(expandHomeDirectory(filePath))
+  if (isAbsolutePreviewPath(normalizedPath)) return resolve(normalizedPath)
 
   const bases = basePaths?.filter(Boolean) ?? []
-  const candidates = candidatePathsForRelativeFile(filePath, bases)
+  const candidates = candidatePathsForRelativeFile(normalizedPath, bases)
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
   }

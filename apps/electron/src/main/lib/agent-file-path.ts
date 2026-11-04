@@ -1,6 +1,15 @@
 import { homedir } from 'node:os'
 import { isAbsolute, resolve } from 'node:path'
 
+/** 仅在 Windows 上转换 Pi 支持的明确盘符别名，不猜测其他 shell 路径。 */
+export function normalizeWindowsShellPath(filePath: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') return filePath
+  if (filePath.startsWith('//') || filePath.includes('\\')) return filePath
+  const match = filePath.match(/^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i)
+  if (!match) return filePath
+  return `${match[1]!.toUpperCase()}:\\${match[2]?.replaceAll('/', '\\') ?? ''}`
+}
+
 /**
  * 展开 shell 风格的用户目录缩写。
  *
@@ -10,7 +19,7 @@ import { isAbsolute, resolve } from 'node:path'
 export function expandHomeDirectory(filePath: string): string {
   if (filePath === '~') return homedir()
   if (filePath.startsWith('~/') || filePath.startsWith('~\\')) {
-    return resolve(homedir(), ...filePath.slice(2).split(/[\\/]+/))
+    return resolve(homedir(), filePath.slice(2))
   }
   return filePath
 }
