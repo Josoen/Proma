@@ -490,6 +490,8 @@ export interface AgentEventUsage {
   cacheCreationTokens?: number
   costUsd?: number
   contextWindow?: number
+  /** runtime = 主进程注册的权威窗口；inferred = 渲染层按模型名推断的占位。 */
+  contextWindowSource?: 'runtime' | 'inferred'
 }
 
 /** SDK 子任务 / SubAgent 用量统计 */

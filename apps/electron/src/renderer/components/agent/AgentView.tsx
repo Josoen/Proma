@@ -247,6 +247,10 @@ function createUserSDKMessage(text: string, uuid?: string, createdAt = Date.now(
   return message
 }
 
+/**
+ * run 启动前的临时窗口占位；主进程随后会下发已注册模型的权威窗口并覆盖它。
+ * 这里允许推断值偏大，权威值到达后可以直接调低。
+ */
 function resolveRunContextWindow(
   modelId: string | undefined,
   previous: number | undefined,

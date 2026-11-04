@@ -158,3 +158,21 @@ export function inferContextWindow(model?: string): number | undefined {
   if (supports1MContext(model)) return ONE_MILLION_CONTEXT_WINDOW
   return DEFAULT_CONTEXT_WINDOW
 }
+
+/**
+ * 解析运行时上报的上下文窗口。
+ *
+ * Pi runtime 注册的 `model.contextWindow` 已经合并了用户覆盖、目录与模型能力，
+ * 是唯一权威值：即使小于按模型名推断的窗口也必须原样使用，否则用户手动调低的
+ * 窗口会在 UI 上被抬高，与实际自动压缩阈值不一致。
+ * 只有上报值缺失或非法（0/负数/NaN/Infinity）时才回退到模型推断。
+ */
+export function resolveReportedContextWindow(
+  reported: number | undefined,
+  modelId: string | undefined,
+): number {
+  if (reported !== undefined && Number.isFinite(reported) && reported > 0) {
+    return reported
+  }
+  return inferContextWindow(modelId) ?? DEFAULT_CONTEXT_WINDOW
+}

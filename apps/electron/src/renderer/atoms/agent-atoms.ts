@@ -9,7 +9,7 @@ import { atom } from 'jotai'
 import type { Getter } from 'jotai'
 import { atomWithStorage, selectAtom } from 'jotai/utils'
 import { atomFamily } from 'jotai-family'
-import type { AgentSessionMeta, AgentEvent, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
+import type { AgentSessionMeta, AgentEvent, AgentEventUsage, AgentWorkspace, AgentPendingFile, RetryAttempt, PromaPermissionMode, PermissionRequest, AskUserRequest, ExitPlanModeRequest, ThinkingConfig, AgentEffort, SDKMessage, UnstagedChangesResult } from '@proma/shared'
 import { PROMA_DEFAULT_PERMISSION_MODE } from '@proma/shared'
 import { calculateDockBadgeCount, countPendingRequests } from '@/lib/dock-badge-count'
 import type { AgentQueuedMessage } from '@/lib/agent-message-queue'
@@ -1228,6 +1228,20 @@ export const agentSessionIndicatorMapAtom = atom<Map<string, SessionIndicatorSta
 })
 
 /**
+ * 合并 contextWindow：主进程注册值（runtime）是权威值，可直接调大或调低；
+ * 渲染层按模型名推断的值（inferred）只能在当前为空时兜底，不能覆盖权威值。
+ */
+function nextContextWindow(
+  prev: number | undefined,
+  usage: AgentEventUsage,
+): number | undefined {
+  const incoming = usage.contextWindow
+  if (incoming == null || !Number.isFinite(incoming) || incoming <= 0) return prev
+  if (usage.contextWindowSource === 'inferred' && prev != null) return prev
+  return incoming
+}
+
+/**
  * 处理 AgentEvent 并更新流式状态（纯函数）
  */
 export function applyAgentEvent(
@@ -1277,8 +1291,7 @@ export function applyAgentEvent(
       //
       // 折中：仅当「整个 query 期间从未收到流式 usage_update」（prev.inputTokens 为空/0）
       // 才从 result.usage 兜底写入 token 字段；已有流式真实值时不动。
-      // - contextWindow：取流式与 result 的较大值（result 未必更权威——多 entry 时
-      //   子 Agent 的小窗口可能拉低值，Fix 1/2 已从源头取 max，此处作为安全网）。
+      // - contextWindow：runtime 事件是权威值，可直接覆盖；渲染层推断值仅在为空时兜底。
       // - costUsd：始终覆盖（本就该是整轮累计成本）
       const needResultFallback = !prev.inputTokens || prev.inputTokens <= 0 || prev.contextUsageIsEstimated === true
       const shouldUseResultUsage = needResultFallback
@@ -1288,11 +1301,7 @@ export function applyAgentEvent(
         ...prev,
         ...(event.usage ? {
           ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-          ...(event.usage.contextWindow != null && {
-            contextWindow: prev.contextWindow != null
-              ? Math.max(prev.contextWindow, event.usage.contextWindow)
-              : event.usage.contextWindow,
-          }),
+          contextWindow: nextContextWindow(prev.contextWindow, event.usage),
           ...(shouldUseResultUsage && {
             inputTokens: event.usage.inputTokens,
             outputTokens: event.usage.outputTokens,
@@ -1332,12 +1341,10 @@ export function applyAgentEvent(
         ...(event.usage.cacheReadTokens != null && { cacheReadTokens: event.usage.cacheReadTokens }),
         ...(event.usage.cacheCreationTokens != null && { cacheCreationTokens: event.usage.cacheCreationTokens }),
         ...(event.usage.costUsd != null && { costUsd: event.usage.costUsd }),
-        // contextWindow 取 max：本分支同时承载「流式 assistant 消息按模型名推断的窗口」
-        // 与「后端从 SDK result 透传的真实窗口（context_window 事件）」两个来源。
-        // 模型窗口在同一会话内不会缩小，取更大值可兼顾两类端点——既不会让推断偏小的
-        // 端点（如 GLM 剥掉 [1m] 后缀）挡住真实的 1M，也不会让回报偏小的端点覆盖正确的 1M。
-        ...(event.usage.contextWindow && {
-          contextWindow: Math.max(resumed.contextWindow ?? 0, event.usage.contextWindow),
+        // 本分支同时承载「运行时注册的权威窗口」与「按模型名推断的占位窗口」：
+        // 权威值可直接调大或调低（用户可能手动改小）；推断值不能覆盖已有权威值。
+        ...(event.usage.contextWindow != null && {
+          contextWindow: nextContextWindow(resumed.contextWindow, event.usage),
         }),
       }
     }

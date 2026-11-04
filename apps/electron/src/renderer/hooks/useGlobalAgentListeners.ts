@@ -281,8 +281,12 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
       case 'model_resolved':
         return [{ type: 'model_resolved', model: evt.model }]
       case 'context_window':
-        // main 进程从 SDK result 拿到的真实 contextWindow，转成 usage_update 让 atom 合并到 streamState
-        return [{ type: 'usage_update', usage: { contextWindow: evt.contextWindow } }]
+        // main 进程上报的是 Pi 已注册模型的实际窗口（含用户覆盖），标记为权威来源；
+        // atom 收到后可直接调大或调低，推断值不能覆盖它。
+        return [{
+          type: 'usage_update',
+          usage: { contextWindow: evt.contextWindow, contextWindowSource: 'runtime' },
+        }]
       case 'permission_mode_changed':
         return [{ type: 'permission_mode_changed', mode: evt.mode }]
       case 'run_resumed':
@@ -398,7 +402,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
             outputTokens: u.output_tokens,
             cacheReadTokens: u.cache_read_input_tokens,
             cacheCreationTokens: u.cache_creation_input_tokens,
-            ...(fallbackWindow ? { contextWindow: fallbackWindow } : {}),
+            ...(fallbackWindow ? { contextWindow: fallbackWindow, contextWindowSource: 'inferred' as const } : {}),
           },
         })
       }
@@ -473,6 +477,7 @@ function payloadToLegacyEvents(payload: AgentStreamPayload): AgentEvent[] {
         usage: (rMsg.total_cost_usd != null || contextWindow != null || u != null) ? {
           costUsd: rMsg.total_cost_usd,
           contextWindow,
+          ...(contextWindow != null && { contextWindowSource: 'inferred' as const }),
           ...(inputTokens != null && { inputTokens }),
           ...(u && { outputTokens: u.output_tokens }),
           ...(u && { cacheReadTokens: u.cache_read_input_tokens }),

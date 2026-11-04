@@ -30,7 +30,7 @@ import {
   isPersistableSDKSystemMessage,
   normalizePathForCompare,
   normalizeMcpTransportType,
-  inferContextWindow,
+  resolveReportedContextWindow,
   inferReasoningTransport,
   resolveReasoningProfile,
   collectSkillActivations,
@@ -1580,11 +1580,11 @@ export class AgentOrchestrator {
         this.eventBus.emit(sessionId, { kind: 'proma_event', event: { type: 'model_resolved', model: resolvedModel } })
       }
       const handleContextWindow = (cw: number): void => {
-        const inferredWindow = inferContextWindow(modelId)
-        const contextWindow = Math.max(cw, inferredWindow ?? 0) || cw
+        // cw 是 Pi 已注册模型的实际窗口，已包含用户覆盖、目录与模型能力合并结果。
+        // 不能再与 inferContextWindow 取 max，否则用户手动调低的窗口会被推断值抬高，
+        // 导致 UI 分母与实际自动压缩阈值不一致。
+        const contextWindow = resolveReportedContextWindow(cw, modelId)
         console.log(`[Agent 编排] 缓存 contextWindow: ${contextWindow}`)
-        // result 消息里的真实 contextWindow 透传到 renderer，
-        // 覆盖流式过程中按模型名推断的 fallback 值（智谱等端点会把 [1m] 等后缀剥掉，导致 fallback 不准）
         this.eventBus.emit(sessionId, {
           kind: 'proma_event',
           event: { type: 'context_window', contextWindow },
