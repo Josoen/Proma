@@ -1670,6 +1670,32 @@ export const workspaceAttachedDirectoriesMapAtom = atom<Map<string, string[]>>(n
  */
 export const workspaceAttachedFilesMapAtom = atom<Map<string, string[]>>(new Map())
 
+/** 复用现有文件变化通知，让正文中尚未解析成功的引用也能重试。 */
+export const agentFileReferenceRevisionAtom = atom(0)
+
+/** 消息所属会话的授权上下文；不读取当前活动会话的目录。 */
+export const agentFileReferenceContextAtomFamily = atomFamily((sessionId: string | undefined) => atom((get) => {
+  const session = get(agentSessionsAtom).find((item) => item.id === sessionId)
+  const workspaceId = session?.workspaceId ?? ''
+  const workspace = get(agentWorkspacesAtom).find((item) => item.id === workspaceId)
+  return JSON.stringify([
+    get(agentFileReferenceRevisionAtom),
+    session?.workspaceId,
+    Boolean(session),
+    session?.agentCwdMode,
+    session?.activeWorktree?.path,
+    session?.attachedDirectories,
+    session?.attachedFiles,
+    workspace?.slug,
+    workspace?.projectRootPath,
+    get(agentSessionPathMapAtom).get(sessionId ?? ''),
+    get(agentAttachedDirectoriesMapAtom).get(sessionId ?? ''),
+    get(agentAttachedFilesMapAtom).get(sessionId ?? ''),
+    get(workspaceAttachedDirectoriesMapAtom).get(workspaceId),
+    get(workspaceAttachedFilesMapAtom).get(workspaceId),
+  ])
+}))
+
 /** 当前 Agent 会话的草稿内容（派生读写原子） */
 export const currentAgentSessionDraftAtom = atom(
   (get) => {

@@ -291,6 +291,10 @@ interface MessagePathResolutionContext {
 }
 
 const BasePathsContext = React.createContext<MessagePathResolutionContext | undefined>(undefined)
+export function useMessagePathResolutionContext(): MessagePathResolutionContext | undefined {
+  return React.useContext(BasePathsContext)
+}
+
 const AgentHistoryQuoteClickContext = React.createContext<((quote: QuotedSelection) => void) | undefined>(undefined)
 
 /** 提供会话与附加目录候选给所有内嵌的 MessageResponse。 */

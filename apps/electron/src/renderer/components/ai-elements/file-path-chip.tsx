@@ -7,12 +7,14 @@
  */
 
 import * as React from 'react'
-import { useStore } from 'jotai'
+import { useAtomValue } from 'jotai'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { useOpenPreview } from '@/components/diff/preview-opener'
-import { currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { agentFileReferenceContextAtomFamily, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { fileReferenceKey, resolveFileReference } from '@/lib/file-reference-resolution'
+import type { FileResolutionEntry } from '@/lib/file-reference-resolution'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ContextMenu,
@@ -32,41 +34,13 @@ import {
   stripLineCol,
 } from './file-path-chip-utils'
 
-interface FileResolutionCacheEntry {
-  exists: boolean
-  resolvedPath?: string
-}
+const inaccessibleFileMessage = '无法访问文件：可能不存在或不在当前会话授权范围内。'
 
-/** 文件存在性缓存（模块级共享，避免重复 IPC）。key 包含会话授权上下文。 */
-const fileExistsCache = new Map<string, FileResolutionCacheEntry>()
-const fileResolutionRequests = new Map<string, Promise<FileResolutionCacheEntry>>()
-function existsCacheKey(filePath: string, bases: string[], sessionId?: string): string {
-  return `${sessionId ?? ''}\0${filePath}\0${bases.join('\0')}`
-}
-
-function resolveFilePathEntry(filePath: string, bases: string[], sessionId?: string): Promise<FileResolutionCacheEntry> {
-  const key = existsCacheKey(filePath, bases, sessionId)
-  const cached = fileExistsCache.get(key)
-  if (cached) return Promise.resolve(cached)
-
-  const inFlight = fileResolutionRequests.get(key)
-  if (inFlight) return inFlight
-
-  const promise = window.electronAPI.resolveFilePath(filePath, {
-    sessionId,
-    candidateBasePaths: bases.length > 0 ? bases : undefined,
-  }).then((resolved) => {
-    const entry: FileResolutionCacheEntry = {
-      exists: resolved !== null,
-      ...(resolved?.resolvedPath ? { resolvedPath: resolved.resolvedPath } : {}),
-    }
-    fileExistsCache.set(key, entry)
-    return entry
-  }).finally(() => {
-    fileResolutionRequests.delete(key)
-  })
-  fileResolutionRequests.set(key, promise)
-  return promise
+function useFileReferenceContext(sessionId?: string) {
+  const activeSessionId = useAtomValue(currentAgentSessionIdAtom)
+  const resolvedSessionId = sessionId ?? activeSessionId ?? undefined
+  const revision = useAtomValue(agentFileReferenceContextAtomFamily(resolvedSessionId))
+  return { resolvedSessionId, revision }
 }
 
 interface FilePathChipProps {
@@ -89,11 +63,10 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
 
   const chipRef = React.useRef<HTMLButtonElement>(null)
   const requestGenerationRef = React.useRef(0)
-  const resolutionRequestRef = React.useRef<{ key: string; promise: Promise<void> } | null>(null)
+  const resolutionRequestRef = React.useRef<{ key: string; promise: Promise<FileResolutionEntry | null> } | null>(null)
   const mountedRef = React.useRef(true)
   const [fileStatus, setFileStatus] = React.useState<'idle' | 'resolved' | 'broken'>('idle')
   const [resolvedPath, setResolvedPath] = React.useState<string | undefined>()
-  const store = useStore()
   const openPreview = useOpenPreview()
 
   const candidateBases = React.useMemo<string[]>(() => {
@@ -101,6 +74,7 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
     if (basePath) return [basePath]
     return []
   }, [basePath, basePaths])
+  const { resolvedSessionId, revision } = useFileReferenceContext(sessionId)
 
   const displayPath = React.useMemo(() => getFilePathDisplayPath({
     originalPath: trimmedPath,
@@ -108,46 +82,40 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
     lineColSuffix: resolvedPath ? lineColSuffix : '',
   }), [trimmedPath, resolvedPath, lineColSuffix])
 
-  const getSessionId = React.useCallback(() => sessionId ?? store.get(currentAgentSessionIdAtom) ?? undefined, [sessionId, store])
-
-  const resolveCurrentPath = React.useCallback((): Promise<void> => {
-    const resolvedSessionId = getSessionId()
-    const key = existsCacheKey(cleanPath, candidateBases, resolvedSessionId)
+  const resolutionKey = fileReferenceKey(cleanPath, candidateBases, resolvedSessionId, revision)
+  const currentKeyRef = React.useRef(resolutionKey)
+  currentKeyRef.current = resolutionKey
+  const resolveCurrentPath = React.useCallback((): Promise<FileResolutionEntry | null> => {
     const inFlight = resolutionRequestRef.current
-    if (inFlight?.key === key) return inFlight.promise
-
+    if (inFlight?.key === resolutionKey) return inFlight.promise
     const generation = ++requestGenerationRef.current
-    let promise: Promise<void>
-    promise = resolveFilePathEntry(cleanPath, candidateBases, resolvedSessionId)
-      .then((entry) => {
-        if (!isAsyncResultCurrent(generation, requestGenerationRef.current, mountedRef.current)) return
-        setFileStatus(entry.exists ? 'resolved' : 'broken')
-        setResolvedPath(entry.resolvedPath)
-      })
-      .catch(() => { /* IPC 失败时保留当前状态 */ })
-      .finally(() => {
-        if (resolutionRequestRef.current?.promise === promise) {
-          resolutionRequestRef.current = null
-        }
-      })
-    resolutionRequestRef.current = { key, promise }
+    const promise = resolveFileReference(cleanPath, candidateBases, resolvedSessionId, revision).then((entry) => {
+      if (!isAsyncResultCurrent(generation, requestGenerationRef.current, mountedRef.current) || currentKeyRef.current !== resolutionKey) return null
+      setFileStatus(entry.exists ? 'resolved' : 'broken')
+      setResolvedPath(entry.resolvedPath)
+      return entry
+    }).catch(() => {
+      if (!isAsyncResultCurrent(generation, requestGenerationRef.current, mountedRef.current) || currentKeyRef.current !== resolutionKey) return null
+      setFileStatus('broken')
+      setResolvedPath(undefined)
+      return { exists: false }
+    }).finally(() => {
+      if (resolutionRequestRef.current?.promise === promise) resolutionRequestRef.current = null
+    })
+    resolutionRequestRef.current = { key: resolutionKey, promise }
     return promise
-  }, [cleanPath, candidateBases, getSessionId])
+  }, [cleanPath, candidateBases, resolvedSessionId, revision, resolutionKey])
 
-  // IntersectionObserver 首次懒检查可使用缓存；Tooltip 打开时会绕过缓存重新解析。
+  // 可见时解析；文件变化或授权上下文变化后重新检查，悬浮和点击也会获取最新结果。
   React.useEffect(() => {
     const el = chipRef.current
-    if (!el || typeof IntersectionObserver === 'undefined') return
-
     requestGenerationRef.current += 1
+    resolutionRequestRef.current = null
     mountedRef.current = true
     setFileStatus('idle')
     setResolvedPath(undefined)
-    const key = existsCacheKey(cleanPath, candidateBases, getSessionId())
-    const cached = fileExistsCache.get(key)
-    if (cached) {
-      setFileStatus(cached.exists ? 'resolved' : 'broken')
-      setResolvedPath(cached.resolvedPath)
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      void resolveCurrentPath()
       return () => {
         mountedRef.current = false
         requestGenerationRef.current += 1
@@ -168,29 +136,38 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
       requestGenerationRef.current += 1
       observer.disconnect()
     }
-  }, [cleanPath, candidateBases, getSessionId, resolveCurrentPath])
+  }, [resolveCurrentPath])
 
   const handleTooltipOpenChange = React.useCallback((open: boolean) => {
     if (open) void resolveCurrentPath()
   }, [resolveCurrentPath])
 
-  const handleClick = React.useCallback(() => {
-    const resolvedSessionId = getSessionId()
+  const handleClick = React.useCallback(async () => {
     if (!resolvedSessionId) return
-
+    const entry = await resolveCurrentPath()
+    if (!entry) return
+    if (!entry.resolvedPath) {
+      toast.error(inaccessibleFileMessage)
+      return
+    }
     openPreview(resolvedSessionId, {
-      filePath: cleanPath,
+      filePath: entry.resolvedPath,
       previewOnly: true,
       basePaths: candidateBases.length > 0 ? candidateBases : undefined,
     })
-  }, [getSessionId, openPreview, cleanPath, candidateBases])
+  }, [resolvedSessionId, resolveCurrentPath, openPreview, candidateBases])
 
-  const handleShowInFolder = React.useCallback(() => {
-    const bases = candidateBases.length > 0 ? candidateBases : undefined
-    window.electronAPI.showItemInFolder(cleanPath, bases)
-      .then((ok) => { if (!ok) toast.error(`未找到文件：${filename}`) })
-      .catch(() => toast.error(`未找到文件：${filename}`))
-  }, [cleanPath, candidateBases, filename])
+  const handleShowInFolder = React.useCallback(async () => {
+    const entry = await resolveCurrentPath()
+    if (!entry) return
+    if (!entry.resolvedPath) {
+      toast.error(inaccessibleFileMessage)
+      return
+    }
+    window.electronAPI.showItemInFolder(entry.resolvedPath)
+      .then((ok) => { if (!ok) toast.error(inaccessibleFileMessage) })
+      .catch(() => toast.error(inaccessibleFileMessage))
+  }, [resolveCurrentPath])
 
   return (
     <ContextMenu>
@@ -217,7 +194,7 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
           </TooltipTrigger>
         </ContextMenuTrigger>
         <TooltipContent side="bottom" className="max-w-[400px] break-all font-mono text-[11px]">
-          {fileStatus === 'broken' ? `文件不存在: ${displayPath}` : displayPath}
+          {fileStatus === 'broken' ? inaccessibleFileMessage : displayPath}
         </TooltipContent>
       </Tooltip>
       <ContextMenuContent className="w-48 z-[9999]">
@@ -243,24 +220,23 @@ interface ResolvableFilePathChipProps extends FilePathChipProps {
  * 解析期间和失败后都保留调用方提供的原始 Markdown 外观。
  */
 export function ResolvableFilePathChip({ fallback, filePath, basePath, basePaths, sessionId, className }: ResolvableFilePathChipProps): React.ReactElement {
-  const store = useStore()
+  const { resolvedSessionId, revision } = useFileReferenceContext(sessionId)
   const candidateBases = React.useMemo<string[]>(() => {
     if (basePaths && basePaths.length > 0) return basePaths.filter(Boolean)
     if (basePath) return [basePath]
     return []
   }, [basePath, basePaths])
   const cleanPath = React.useMemo(() => stripLineCol(filePath.trim()).path, [filePath])
-  const resolvedSessionId = sessionId ?? store.get(currentAgentSessionIdAtom) ?? undefined
   const resolutionKey = React.useMemo(
-    () => existsCacheKey(cleanPath, candidateBases, resolvedSessionId),
-    [candidateBases, cleanPath, resolvedSessionId],
+    () => fileReferenceKey(cleanPath, candidateBases, resolvedSessionId, revision),
+    [candidateBases, cleanPath, resolvedSessionId, revision],
   )
   const [resolvedKey, setResolvedKey] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     let cancelled = false
     setResolvedKey(null)
-    void resolveFilePathEntry(cleanPath, candidateBases, resolvedSessionId)
+    void resolveFileReference(cleanPath, candidateBases, resolvedSessionId, revision)
       .then((entry) => {
         if (!cancelled && entry.exists) setResolvedKey(resolutionKey)
       })
@@ -268,10 +244,10 @@ export function ResolvableFilePathChip({ fallback, filePath, basePath, basePaths
         if (!cancelled) setResolvedKey(null)
       })
     return () => { cancelled = true }
-  }, [candidateBases, cleanPath, resolvedSessionId, resolutionKey])
+  }, [candidateBases, cleanPath, resolvedSessionId, revision, resolutionKey])
 
   if (resolvedKey !== resolutionKey) return fallback
-  return <FilePathChip filePath={filePath} basePath={basePath} basePaths={basePaths} sessionId={sessionId} className={className} />
+  return <FilePathChip filePath={filePath} basePath={basePath} basePaths={basePaths} sessionId={resolvedSessionId} className={className} />
 }
 
 export { isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath }

@@ -10,6 +10,7 @@ import { MultiFileDiff } from '@pierre/diffs/react'
 import type { FileContents } from '@pierre/diffs'
 import { resolvedThemeAtom } from '@/atoms/theme'
 import { FilePathChip } from '@/components/ai-elements/file-path-chip'
+import { useMessagePathResolutionContext } from '@/components/ai-elements/message'
 import { PIERRE_DIFF_CSS } from './pierre-styles'
 
 function cheapHash(s: string): number {
@@ -25,6 +26,7 @@ interface WriteResultRendererProps {
 }
 
 export function WriteResultRenderer({ result, isError, input }: WriteResultRendererProps): React.ReactElement {
+  const pathContext = useMessagePathResolutionContext()
   const theme = useAtomValue(resolvedThemeAtom)
   const content = typeof input.content === 'string' ? input.content : ''
   const filePath = typeof input.file_path === 'string' ? input.file_path : ''
@@ -64,7 +66,7 @@ export function WriteResultRenderer({ result, isError, input }: WriteResultRende
   if (!content) {
     return (
       <div className="text-[12px] text-muted-foreground flex items-center gap-1">
-        已写入 {filePath ? <FilePathChip filePath={filePath} /> : <span className="font-mono text-foreground/70">文件</span>}
+        已写入 {filePath ? <FilePathChip filePath={filePath} basePaths={pathContext?.basePaths} sessionId={pathContext?.sessionId} /> : <span className="font-mono text-foreground/70">文件</span>}
       </div>
     )
   }

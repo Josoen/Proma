@@ -19,6 +19,7 @@ import type {
   SDKToolResultBlock,
 } from '@proma/shared'
 import { FilePathChip } from '@/components/ai-elements/file-path-chip'
+import { useMessagePathResolutionContext } from '@/components/ai-elements/message'
 
 const MUTATING_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
@@ -109,6 +110,7 @@ export function TurnFileChangesSummary({
   turnMessages,
   basePath,
 }: TurnFileChangesSummaryProps): React.ReactElement | null {
+  const pathContext = useMessagePathResolutionContext()
   const paths = React.useMemo(() => collectFilePaths(turnMessages), [turnMessages])
 
   if (paths.length === 0) return null
@@ -118,7 +120,7 @@ export function TurnFileChangesSummary({
       <div className="pt-3 border-t-2 border-dashed border-border/60">
         <div className="flex flex-wrap gap-1.5">
           {paths.map((filePath) => (
-            <FilePathChip key={filePath} filePath={filePath} basePath={basePath} />
+            <FilePathChip key={filePath} filePath={filePath} basePath={basePath} basePaths={pathContext?.basePaths} sessionId={pathContext?.sessionId} />
           ))}
         </div>
       </div>
