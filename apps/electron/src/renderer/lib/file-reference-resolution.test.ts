@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { fileReferenceKey, resolveFileReference } from './file-reference-resolution'
+import { doesFileChangeAffectReference, fileReferenceKey, resolveFileReference } from './file-reference-resolution'
 import { isAsyncResultCurrent, stripLineCol } from '../components/ai-elements/file-path-chip-utils'
 
 interface ResolvedFile {
@@ -22,6 +22,32 @@ afterEach(() => {
 })
 
 describe('文件引用请求刷新与隔离', () => {
+  test('given 未解析成功的引用 when 其他项目或同前缀目录变化 then 不重查；候选根内创建则重查', () => {
+    const scope = { directoryRoots: ['/project', '/attached'], attachedFiles: ['/single/a.ts'] }
+    expect(doesFileChangeAffectReference(['/other/a.ts', '/project-backup/a.ts'], scope, false)).toBe(false)
+    expect(doesFileChangeAffectReference(['/project/new.ts'], scope, false)).toBe(true)
+    expect(doesFileChangeAffectReference(['/attached/new.ts'], scope, false)).toBe(true)
+    expect(doesFileChangeAffectReference(['/single/a.ts'], scope, false)).toBe(true)
+    expect(doesFileChangeAffectReference(['/single/other.ts'], scope, false)).toBe(false)
+  })
+
+  test('given 已知实际文件 when 无关文件变化 then 不重查；实际文件或父目录变化则重查', () => {
+    const scope = { resolvedPath: '/actual/src/a.ts', directoryRoots: ['/project'], attachedFiles: [] }
+    expect(doesFileChangeAffectReference(['/project/b.ts', '/actual/src/b.ts', '/actual/src/a.ts.bak'], scope, false)).toBe(false)
+    expect(doesFileChangeAffectReference(['/actual/src/a.ts'], scope, false)).toBe(true)
+    expect(doesFileChangeAffectReference(['/actual/src'], scope, false)).toBe(true)
+  })
+
+  test('given Windows 大小写与分隔符或 POSIX 反斜杠文件名 when 匹配通知 then 遵守本机路径语义', () => {
+    const scope = { resolvedPath: 'D:\\Project\\a.ts', directoryRoots: [], attachedFiles: [] }
+    expect(doesFileChangeAffectReference(['d:/project/A.ts'], scope, true)).toBe(true)
+    expect(doesFileChangeAffectReference(['D:/Project/b.ts'], scope, true)).toBe(false)
+    const posixScope = { resolvedPath: '/project/a\\b.ts', directoryRoots: [], attachedFiles: [] }
+    expect(doesFileChangeAffectReference(['/project/a/b.ts', '/Project/a\\b.ts'], posixScope, false)).toBe(false)
+    expect(doesFileChangeAffectReference(['/project/a\\b.ts'], posixScope, false)).toBe(true)
+    expect(doesFileChangeAffectReference(['/'], posixScope, false)).toBe(true)
+  })
+
   test('given 同一会话的相同引用 when 并发检查 then 合并进行中请求并携带候选根', async () => {
     const pending = Promise.withResolvers<ResolvedFile | null>()
     resolvePath.mockReturnValue(pending.promise)

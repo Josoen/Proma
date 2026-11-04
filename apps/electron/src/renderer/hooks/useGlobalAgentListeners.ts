@@ -51,7 +51,7 @@ import {
   agentSelectedWorktreeAtom,
   agentNonGitFileChangesAtom,
   agentFileChangesCurrentRunAtom,
-  agentFileReferenceRevisionAtom,
+  agentFileReferenceChangesAtom,
   agentSidePanelOpenAtomFamily,
   revealChangedWorkspaceComponentAtom,
   agentSideDelegationMapAtom,
@@ -1029,8 +1029,8 @@ export function useGlobalAgentListeners(): void {
     const cleanupWatchedFileChanges = window.electronAPI.onWorkspaceFilesChanged((changedPaths) => {
       const filePaths = (changedPaths ?? []).filter(isAbsolutePath)
       refreshAffectedPreviews(filePaths)
-      store.set(agentFileReferenceRevisionAtom, (revision) => revision + 1)
       if (filePaths.length === 0) return
+      store.set(agentFileReferenceChangesAtom, (previous) => ({ version: previous.version + 1, paths: filePaths }))
 
       void (async () => {
         const streamingStates = store.get(agentStreamingStatesAtom)

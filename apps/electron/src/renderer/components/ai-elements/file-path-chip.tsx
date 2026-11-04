@@ -7,12 +7,11 @@
  */
 
 import * as React from 'react'
-import { useAtomValue } from 'jotai'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { FileTypeIcon } from '@/components/file-browser/FileTypeIcon'
 import { useOpenPreview } from '@/components/diff/preview-opener'
-import { agentFileReferenceContextAtomFamily, currentAgentSessionIdAtom } from '@/atoms/agent-atoms'
+import { useFileReferenceContext } from '@/hooks/useFileReferenceContext'
 import { fileReferenceKey, resolveFileReference } from '@/lib/file-reference-resolution'
 import type { FileResolutionEntry } from '@/lib/file-reference-resolution'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -36,11 +35,10 @@ import {
 
 const inaccessibleFileMessage = '无法访问文件：可能不存在或不在当前会话授权范围内。'
 
-function useFileReferenceContext(sessionId?: string) {
-  const activeSessionId = useAtomValue(currentAgentSessionIdAtom)
-  const resolvedSessionId = sessionId ?? activeSessionId ?? undefined
-  const revision = useAtomValue(agentFileReferenceContextAtomFamily(resolvedSessionId))
-  return { resolvedSessionId, revision }
+interface FileReferenceSnapshot {
+  /** 绑定路径、候选根、所属会话与授权上下文；文件变化由持有快照的父组件重查。 */
+  key: string
+  entry: FileResolutionEntry
 }
 
 interface FilePathChipProps {
@@ -53,10 +51,12 @@ interface FilePathChipProps {
   /** 消息所属会话；嵌入子会话时不得回退为父会话的授权边界。 */
   sessionId?: string
   className?: string
+  /** 正文候选刚取得的结果，供标签首次展示复用，交互仍重新检查。 */
+  resolution?: FileReferenceSnapshot
 }
 
 /** 文件路径芯片 — 可点击，触发文件预览 */
-export function FilePathChip({ filePath, basePath, basePaths, sessionId, className }: FilePathChipProps): React.ReactElement {
+export function FilePathChip({ filePath, basePath, basePaths, sessionId, className, resolution }: FilePathChipProps): React.ReactElement {
   const trimmedPath = filePath.trim()
   const { path: cleanPath, suffix: lineColSuffix } = stripLineCol(trimmedPath)
   const filename = getFileName(cleanPath)
@@ -74,7 +74,8 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
     if (basePath) return [basePath]
     return []
   }, [basePath, basePaths])
-  const { resolvedSessionId, revision } = useFileReferenceContext(sessionId)
+  const { resolvedSessionId, authorization, revision } = useFileReferenceContext(sessionId, candidateBases, resolvedPath, !resolution)
+  const snapshotKey = fileReferenceKey(cleanPath, candidateBases, resolvedSessionId, authorization)
 
   const displayPath = React.useMemo(() => getFilePathDisplayPath({
     originalPath: trimmedPath,
@@ -112,6 +113,14 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
     requestGenerationRef.current += 1
     resolutionRequestRef.current = null
     mountedRef.current = true
+    if (resolution?.key === snapshotKey) {
+      setFileStatus(resolution.entry.exists ? 'resolved' : 'broken')
+      setResolvedPath(resolution.entry.resolvedPath)
+      return () => {
+        mountedRef.current = false
+        requestGenerationRef.current += 1
+      }
+    }
     setFileStatus('idle')
     setResolvedPath(undefined)
     if (!el || typeof IntersectionObserver === 'undefined') {
@@ -136,7 +145,7 @@ export function FilePathChip({ filePath, basePath, basePaths, sessionId, classNa
       requestGenerationRef.current += 1
       observer.disconnect()
     }
-  }, [resolveCurrentPath])
+  }, [resolveCurrentPath, resolution, snapshotKey])
 
   const handleTooltipOpenChange = React.useCallback((open: boolean) => {
     if (open) void resolveCurrentPath()
@@ -220,34 +229,30 @@ interface ResolvableFilePathChipProps extends FilePathChipProps {
  * 解析期间和失败后都保留调用方提供的原始 Markdown 外观。
  */
 export function ResolvableFilePathChip({ fallback, filePath, basePath, basePaths, sessionId, className }: ResolvableFilePathChipProps): React.ReactElement {
-  const { resolvedSessionId, revision } = useFileReferenceContext(sessionId)
+  const [resolution, setResolution] = React.useState<FileReferenceSnapshot | null>(null)
   const candidateBases = React.useMemo<string[]>(() => {
     if (basePaths && basePaths.length > 0) return basePaths.filter(Boolean)
     if (basePath) return [basePath]
     return []
   }, [basePath, basePaths])
+  const { resolvedSessionId, authorization, revision } = useFileReferenceContext(sessionId, candidateBases, resolution?.entry.resolvedPath)
   const cleanPath = React.useMemo(() => stripLineCol(filePath.trim()).path, [filePath])
-  const resolutionKey = React.useMemo(
-    () => fileReferenceKey(cleanPath, candidateBases, resolvedSessionId, revision),
-    [candidateBases, cleanPath, resolvedSessionId, revision],
-  )
-  const [resolvedKey, setResolvedKey] = React.useState<string | null>(null)
+  const snapshotKey = fileReferenceKey(cleanPath, candidateBases, resolvedSessionId, authorization)
 
   React.useEffect(() => {
     let cancelled = false
-    setResolvedKey(null)
     void resolveFileReference(cleanPath, candidateBases, resolvedSessionId, revision)
       .then((entry) => {
-        if (!cancelled && entry.exists) setResolvedKey(resolutionKey)
+        if (!cancelled) setResolution({ key: snapshotKey, entry })
       })
       .catch(() => {
-        if (!cancelled) setResolvedKey(null)
+        if (!cancelled) setResolution(null)
       })
     return () => { cancelled = true }
-  }, [candidateBases, cleanPath, resolvedSessionId, revision, resolutionKey])
+  }, [candidateBases, cleanPath, resolvedSessionId, revision, snapshotKey])
 
-  if (resolvedKey !== resolutionKey) return fallback
-  return <FilePathChip filePath={filePath} basePath={basePath} basePaths={basePaths} sessionId={resolvedSessionId} className={className} />
+  if (resolution?.key !== snapshotKey || !resolution.entry.exists) return fallback
+  return <FilePathChip filePath={filePath} basePath={basePath} basePaths={basePaths} sessionId={resolvedSessionId} className={className} resolution={resolution} />
 }
 
 export { isAbsoluteFilePath, isImageFilePath, isLocalFileReference, isRelativeFilePath }

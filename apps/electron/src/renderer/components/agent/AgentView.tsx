@@ -987,9 +987,10 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
     return paths
   }, [attachedDirs, attachedFiles])
 
-  // 合并会话级 + 工作区级附加目录，供消息区文件路径解析使用
+  // 合并项目文件根及会话级、工作区级附加目录，供消息区解析与文件通知筛选使用。
   const allAttachedDirs = React.useMemo(() => {
     const dirs = [...attachedDirs]
+    if (workspaceFilesPath && !dirs.includes(workspaceFilesPath)) dirs.push(workspaceFilesPath)
     for (const d of workspaceDirs) {
       if (d && !dirs.includes(d)) dirs.push(d)
     }
@@ -999,7 +1000,7 @@ export function AgentView({ sessionId, embedded = false }: AgentViewProps): Reac
       if (parent && !dirs.includes(parent)) dirs.push(parent)
     }
     return dirs
-  }, [attachedDirs, workspaceDirs, attachedFiles, wsAttachedFiles])
+  }, [attachedDirs, workspaceDirs, attachedFiles, wsAttachedFiles, workspaceFilesPath])
 
   const createBaseAdditionalDirectories = React.useCallback((): Set<string> => {
     const dirs = new Set(attachedDirs)
