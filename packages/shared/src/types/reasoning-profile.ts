@@ -386,6 +386,17 @@ export function resolveReasoningProfile(input: ResolveReasoningProfileInput): Re
 
 const PI_EXTENDED_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const satisfies readonly AgentThinkingLevel[]
 
+/**
+ * 按标准顺序排列思考等级，仅保留传入的档位。
+ *
+ * 渠道设置允许用户只启用部分档位，但存储顺序取决于勾选顺序；
+ * 展示与协议消费前统一排序，保证 关闭 → 低 → 中 → 高 → 极高 → 最大。
+ */
+export function sortThinkingLevels(levels: readonly AgentThinkingLevel[]): AgentThinkingLevel[] {
+  const available = new Set(levels)
+  return PI_EXTENDED_THINKING_LEVELS.filter((level) => available.has(level))
+}
+
 function getPiCatalogThinkingLevels(catalog: PiCatalogReasoningMetadata): AgentThinkingLevel[] {
   if (!catalog.reasoning) return []
 

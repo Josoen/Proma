@@ -20,6 +20,7 @@ import {
   isMimoV26Model,
   resolveReasoningCapability,
   resolveReasoningProfile,
+  sortThinkingLevels,
   type AgentThinkingLevel,
   type CodexOAuthCredentials,
   type GithubCopilotOAuthCredentials,
@@ -704,10 +705,11 @@ export async function resolvePiReasoningCapability(
     ? configured.thinkingLevels
     : modelsDevModel?.thinkingLevels
   if (levels?.length) {
+    const sortedLevels = sortThinkingLevels(levels)
     const defaultLevel = configured?.defaultThinkingLevel
       ?? (resolved?.levels.includes('medium') ? 'medium' : undefined)
-      ?? (levels.includes('medium') ? 'medium' : (levels.find((level) => level !== 'off') ?? 'off'))
-    return { source: resolved?.source ?? 'pi-catalog', levels, defaultLevel }
+      ?? (sortedLevels.includes('medium') ? 'medium' : (sortedLevels.find((level) => level !== 'off') ?? 'off'))
+    return { source: resolved?.source ?? 'pi-catalog', levels: sortedLevels, defaultLevel }
   }
   return resolved
 }

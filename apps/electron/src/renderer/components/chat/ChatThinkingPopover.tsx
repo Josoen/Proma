@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Brain } from 'lucide-react'
-import { getGeminiModelCapability, type AgentThinkingLevel } from '@proma/shared'
+import { getGeminiModelCapability, sortThinkingLevels, type AgentThinkingLevel } from '@proma/shared'
 import { useAtomValue } from 'jotai'
 import { channelsAtom } from '@/atoms/chat-atoms'
 import { Button } from '@/components/ui/button'
@@ -53,7 +53,7 @@ export function ChatThinkingPopover({ modelId, channelId }: ChatThinkingPopoverP
   }, [channel?.baseUrl, channel?.provider, channelId, configuredModel?.thinkingLevels, modelId])
 
   const thinkingLevels: AgentThinkingLevel[] = configuredModel?.thinkingLevels?.length
-    ? configuredModel.thinkingLevels
+    ? sortThinkingLevels(configuredModel.thinkingLevels)
     : catalogLevels ?? (capability ? [...capability.thinkingLevels] : ['off'])
   const defaultLevel = configuredModel?.defaultThinkingLevel
     ?? capability?.defaultThinkingLevel
