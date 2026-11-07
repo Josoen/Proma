@@ -154,6 +154,8 @@ const MODEL_LOGO_MAP: Record<string, string> = {
   'gpt-5\\.1': GPT51Logo,
   'gpt-5': GPT5Logo,
   gpts: GPT4Logo,
+  // 通用兜底：未收录的新 GPT 型号（如 gpt-6.1-sol）落到 OpenAI 品牌图标
+  gpt: OpenAILogo,
 
   // === Claude / Anthropic ===
   '(claude|anthropic-)': ClaudeLogo,
